@@ -1,0 +1,61 @@
+import { expect, test } from '@playwright/test'
+
+test('loading, temporary failure and retry', async ({ page }) => {
+  await page.goto('/?demo=error-once')
+  await expect(page.getByRole('status')).toHaveText('Подождите немного…')
+  await expect(page.getByRole('alert')).toContainText('Не удалось открыть приложение')
+  await page.getByRole('button', { name: 'Попробовать снова' }).click()
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Первый шаг к нужной помощи')
+  await expect(page.getByText('Демоверсия', { exact: true })).toBeVisible()
+})
+
+for (const [width, height] of [[360, 640], [390, 844], [768, 1024], [1440, 900]]) {
+  test(`layout and synthetic form at ${width}x${height}`, async ({ page }) => {
+    await page.setViewportSize({ width, height })
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Открыть пример интерфейса' }).click()
+    await expect(page.getByRole('heading', { level: 1 })).toBeFocused()
+    await expect(page.getByLabel('Пример варианта')).toHaveValue('first')
+    await page.getByLabel('Пример варианта').selectOption('second')
+    await page.getByLabel('Пример текстового ответа').fill('Synthetic test text')
+    await page.getByRole('button', { name: 'Проверить форму' }).click()
+    await expect(page.getByRole('status')).toContainText('данные никуда не отправлены')
+    await page.getByRole('button', { name: 'Сбросить' }).click()
+    await expect(page.getByLabel('Пример варианта')).toHaveValue('first')
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await page.getByRole('button', { name: 'На главную' }).click()
+    await expect(page.getByRole('heading', { level: 1 })).toBeFocused()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0)
+  })
+}
+
+test('keyboard navigation and focus indication', async ({ page }) => {
+  await page.goto('/')
+  const open = page.getByRole('button', { name: 'Открыть пример интерфейса' })
+  await expect(open).toBeVisible()
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('link', { name: 'Перейти к содержимому' })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('button', { name: 'Читаемость', exact: true })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(open).toBeFocused()
+  expect(await open.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe('solid')
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('heading', { level: 1 })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(page.getByLabel('Пример варианта')).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(page.getByLabel('Пример текстового ответа')).toBeFocused()
+})
+
+test('fields stay reachable in a shortened viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Открыть пример интерфейса' }).click()
+  await page.setViewportSize({ width: 390, height: 380 })
+  await page.getByLabel('Пример текстового ответа').fill('Synthetic keyboard example')
+  await page.getByRole('button', { name: 'Проверить форму' }).click()
+  await expect(page.getByRole('status')).toBeVisible()
+})
