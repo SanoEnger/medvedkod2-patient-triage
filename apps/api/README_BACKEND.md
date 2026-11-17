@@ -1,0 +1,95 @@
+# МедВед.Код2 · только backend
+
+Самостоятельная часть FastAPI для интеграции в monorepo `SanoEnger/medvedkod2-patient-triage`.
+**Не содержит React, PostgreSQL-схем и миграций, Groq-клиента или NLP-модели.** Это не production medical device: только синтетические кейсы хакатона.
+
+## Состав
+
+- `app/main.py` — FastAPI, Swagger /docs, OpenAPI /openapi.json, заголовки безопасности, CORS.
+- `app/api/routes.py` — REST API, авторизация и endpoints опроса.
+- `app/core/` — конфигурация из окружения, подписанные короткоживущие bearer-токены.
+- `app/integrations/max_core.py` — только server-to-server проверка 5-минутного JWT организаторов по `/api/v3/users/user-for-external-service`.
+- `app/services/safety.py` — детерминированная проверка экстренных признаков после каждого ответа, независимая от LLM.
+- `app/services/sessions.py` — опрос, возврат, пересчёт, идемпотентность, TTL, результат.
+- `app/schemas/survey.py` — Pydantic v2.
+- `tests/test_backend.py` — офлайн-тесты на synthetic input.
+
+## Запуск (Python 3.12+)
+
+Из папки `apps/api`:
+
+```bash
+python -m venv .venv
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+# Linux/macOS: source .venv/bin/activate
+pip install -r requirements-backend.txt
+```
+
+Установить **свой случайный** `SESSION_SIGNING_KEY` длиной минимум 32 символа, не коммитить в git:
+
+```powershell
+# Windows PowerShell, локальный демонстрационный режим
+$env:SESSION_SIGNING_KEY = python -c "import secrets; print(secrets.token_urlsafe(48))"
+$env:DEMO_MODE = 'true'
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Swagger UI: http://127.0.0.1:8000/docs. Тесты: `python -m pytest -q tests`. В Windows также можно запускать `run_demo.ps1` и `test_backend.ps1` (после установки зависимостей).
+
+Для реального MAX launch дополнительно задайте на сервере `CORE_SERVICE_TOKEN` из выданных организаторами секретов и установите `DEMO_MODE=false`. Описание всех переменных в `.env.backend.example`. **Сервисный токен никуда не отдаётся фронтенду.**
+
+#Подробный актуальный контракт MAX, включая разницу двух токенов и URL для организаторов: [`MAX_INTEGRATION.md`](MAX_INTEGRATION.md).
+
+## Контракт авторизации
+
+1. Фронтенд получает JWT из адреса `?token=...` и отправляет `POST /api/v1/auth/launch` с JSON `{"mode":"host","host_token":"<JWT>"}`.
+2. Backend вызывает `GET https://tm-test-yakut.hostco.ru/api/v3/users/user-for-external-service?token=...` с `Authorization: Bearer <CORE_SERVICE_TOKEN>`.
+3. Backend проверяет ответ и использует только `_id`, не сохраняет и не выдаёт СНИЛС, ОМС, дату рождения, ФИО, телефон.
+4. Backend возвращает **свой** `access_token` на час; остальные запросы: `Authorization: Bearer <access_token>`.
+5. После exchange фронтенд должен убрать token из адресной строки с `history.replaceState` и не логировать его. Не отправлять сюда `initDataUnsafe` вместо JWT.
+
+### Контракт опроса
+
+| Метод | Путь | Описание |
+|---|---|---|
+| GET | `/health` | Статус |
+| POST | `/api/v1/auth/launch` | Проверка launch / demo |
+| POST | `/api/v1/sessions` | `{"accepted_disclaimer":true}` |
+| GET | `/api/v1/sessions/{id}` | Текущий шаг, прогресс, состояние |
+| POST | `/api/v1/sessions/{id}/answers` | `{question_key, value, idempotency_key}` |
+| POST | `/api/v1/sessions/{id}/back` | `{target_step}`; индекс с нуля, стирает следующие ответы |
+| POST | `/api/v1/sessions/{id}/triage` | Карточка срочности, если достаточно проверенных правил |
+| DELETE | `/api/v1/sessions/{id}` | Удаление демо-сессии |
+
+Порядок `question_key`:
+`primary_complaint` → `patient_context` → `symptom_details` → `red_flags` → `medical_history`.
+Схемы каждого `value` и примеры доступны через Swagger / OpenAPI. При экстренном флаге любой ответ немедленно переводит сессию в `EMERGENCY_STOP`, возвращает 103/112 и не вызывает модель. Возврат из этого состояния запрещён: нужна новая безопасная сессия. Повтор с прежним `idempotency_key` возвращает прежний ответ, а с другим телом возвращает 409.
+
+### Быстрая проверка без MAX
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/api/v1/auth/launch -H "Content-Type: application/json" -d '{"mode":"demo"}'
+```
+
+Возьмите `access_token`, подставьте его в заголовок `Authorization: Bearer ...`, создайте сессию и отправьте первый ответ:
+
+```json
+{"question_key":"primary_complaint", "value":{"category":"breathing", "text":"одышка в покое"}, "idempotency_key":"00000000-0000-4000-8000-000000000001"}
+```
+
+Ожидается `EMERGENCY_STOP`, `RF_DYSPNEA_REST`, 103/112.
+
+## Границы, важные до интеграции
+
+- Демо-хранилище `SessionService` работает **в памяти одного процесса**. При перезапуске ответы пропадут; несколько workers не поддерживаются. Смирнов подключает PostgreSQL-репозиторий и миграции отдельным PR; интерфейсы `SessionService` сохраняются.
+- NLP-модуль Волосникова в `app/integrations/groq/` **не вызывается**. Он не нужен для обязательной детерминированной остановки T01–T10; после согласования его можно вызвать **только после pre-safety и перед повторной post-safety**, не позволяя ему снижать срочность. Это отдельный интеграционный PR.
+- Для обычных случаев результат `UNKNOWN`, за исключением одного узкого синтетического `DEMO_SKIN_MILD_V0` с `PLANNED`. P1/P3 и клинические шаблоны не утверждены, поэтому самопомощь и несуществующие диагнозы не выдаются.
+- Лексический поиск ограничен. Это **не** медицинский триаж для реальных пациентов. Признаки T01–T10 протестированы только на синтетических формулировках; врач/ментор должен утвердить правила до реальных пользователей.
+- Сервис выдаёт собственные HMAC токены без списка отзыва. Для production желательно server-side session store / rotation / shared throttling на proxy. Локальный auth launch ограничен 20 попытками в минуту на IP в рамках одного процесса. TTL демо-сессий максимум 24 ч, cleanup ленивый (при обращении), реальных медицинских данных не принимать.
+- CSP `FRAME_ANCESTORS` и `CORS_ORIGINS` согласовать с MAX-host. Встроенному iframe не гарантирован доступ к cookie, поэтому выбран bearer header вместо cookie (CSRF для cookie здесь не нужен). В production HTTPS обязателен.
+- Не коммитить `.env`, сервисные токены, user JWT, Groq key, реальные медицинские данные. Секреты, жалобы и данные пользователя не логируются кодом приложения.
+- Пользовательское имя, возраст, пол и номер полиса из Core **не** используются/не сохраняются. Для детского температурного правила возраст в форме **синтетический**, а не дата рождения из Core.
+
+## Git workflow
+
+Файлы предназначены для feature-веток Вахрушева: API foundation, triage-safety, max-integration. Не копировать их в `main`/`develop` напрямую; при разнесении на три PR учитывать зависимость модулей. В этой поставке удалённого push или PR нет.
