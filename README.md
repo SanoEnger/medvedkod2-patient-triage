@@ -1,5 +1,45 @@
 # МедВед — навигатор пациента
 
+Рабочая интеграционная ветка — `develop`. `main` предназначена для проверенного
+релиза. Здесь собраны React-оболочка, FastAPI backend, детерминированные правила
+безопасности, MAX server-to-server adapter и автономный Groq NLP-модуль.
+
+Это демонстрационный прототип для синтетических данных. Frontend пока не вызывает
+backend, а SessionService пока не подключает Groq. PostgreSQL и полноценный
+пользовательский опросник ещё не реализованы. Наличие компонентов в одной ветке
+не означает готовность медицинского сервиса или сквозной интеграции MAX.
+
+## Компоненты и запуск
+
+- [Backend и API](apps/api/README_BACKEND.md) — конфигурация, запуск сервера,
+  in-memory сессии и правила безопасности.
+- [Groq NLP](apps/api/README.md) — установка, mock, fallback и формат извлечения.
+- [React UI](apps/web/README.md) — запуск, demo/production-сборки и браузерные тесты.
+- [MAX](apps/api/MAX_INTEGRATION.md) — границы серверной проверки host-токена.
+
+Для общей проверки Python-компонентов из `apps/api`:
+
+```powershell
+python -m pip install -e ".[test]" -r requirements-backend.txt
+python -m pytest -q
+```
+
+Для проверки frontend из `apps/web`:
+
+```powershell
+npm ci
+npm run lint
+npm run build
+npm run build:demo
+npx playwright install chromium
+npm test
+```
+
+Не передавайте реальные медицинские данные и не добавляйте секреты в Git.
+Клиническая проверка правил и проверка реального MAX остаются отдельными задачами.
+
+## Подробности текущей UI-поставки
+
 Первая задача: `feature/smirnov-react-ui`. React + TypeScript + Vite, адаптивная оболочка и общие компоненты. Работает автономно в браузере на синтетических данных. Медицинский опрос, REST API и PostgreSQL будут реализованы в отдельных ветках.
 
 ## Запуск
