@@ -1,0 +1,85 @@
+name: medved
+
+x-api-image: &api-image
+  image: medved-api:local
+  build:
+    context: ./apps/api
+
+services:
+  init:
+    <<: *api-image
+    user: "0:0"
+    command: ["python", "-m", "app.container", "init"]
+    volumes:
+      - api-secrets:/run/medved
+      - postgres-secrets:/run/postgres-secrets
+      - web-secrets:/run/web-secrets
+    restart: "no"
+
+  postgres:
+    build:
+      context: ./apps/api/postgres
+    environment:
+      POSTGRES_USER: medved
+      POSTGRES_DB: medved
+      POSTGRES_PASSWORD_FILE: /run/postgres-secrets/password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - postgres-secrets:/run/postgres-secrets:ro
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    <<: *api-image
+    environment:
+      DEMO_MODE: ${DEMO_MODE:-true}
+      NLP_MODE: ${NLP_MODE:-mock}
+      CORE_URL: ${CORE_URL:-https://tm-test-yakut.hostco.ru}
+      CORE_SERVICE_TOKEN: ${CORE_SERVICE_TOKEN:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-}
+      FRAME_ANCESTORS: ${FRAME_ANCESTORS:-'self'}
+    volumes:
+      - api-secrets:/run/medved:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.container", "health"]
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 20
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        VITE_HOST_MODE: ${VITE_HOST_MODE:-demo}
+    ports:
+      - "127.0.0.1:${WEB_HTTPS_PORT:-8443}:8443"
+    volumes:
+      - web-secrets:/run/web-secrets:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--cacert", "/run/web-secrets/ca.crt", "--output", "/dev/null", "https://localhost:8443/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  api-secrets:
+  postgres-secrets:
+  web-secrets:

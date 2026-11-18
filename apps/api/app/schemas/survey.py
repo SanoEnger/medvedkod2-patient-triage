@@ -5,6 +5,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
 from app.integrations.groq.schemas import ExtractionResult
 
 
@@ -44,6 +45,7 @@ class PatientContext(StrictModel):
     age_years: int | None = Field(default=None, ge=0, le=120)
     temperature_c: float | None = Field(default=None, ge=30, le=45)
     pregnancy: bool | None = None
+    lactation: bool | None = None
 
 
 class SymptomDetails(StrictModel):
@@ -72,10 +74,11 @@ class MedicalHistory(StrictModel):
     medications: list[str] = Field(default_factory=list, max_length=10)
     allergies: list[str] = Field(default_factory=list, max_length=10)
     operations_last_year: list[str] = Field(default_factory=list, max_length=10)
+    hospitalizations_last_year: list[str] = Field(default_factory=list, max_length=10)
     family_history: list[str] = Field(default_factory=list, max_length=10)
     habits: list[str] = Field(default_factory=list, max_length=10)
 
-    @field_validator("chronic_conditions", "medications", "allergies", "operations_last_year", "family_history", "habits")
+    @field_validator("chronic_conditions", "medications", "allergies", "operations_last_year", "hospitalizations_last_year", "family_history", "habits")
     @classmethod
     def validate_entries(cls, value: list[str]) -> list[str]:
         if any(not isinstance(x, str) or len(x) > 120 for x in value):

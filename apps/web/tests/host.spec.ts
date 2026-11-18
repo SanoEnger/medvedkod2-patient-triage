@@ -13,7 +13,7 @@ test('host JWT overrides demo, is exchanged once and removed from URL', async ({
   expect(page.url()).toContain('keep=yes#section')
   expect(calls).toBe(1)
   expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0)
-  await page.getByRole('button', { name: 'Открыть пример интерфейса' }).click()
+  await page.getByRole('button', { name: 'Начать опрос' }).click()
   expect(calls).toBe(1)
 })
 

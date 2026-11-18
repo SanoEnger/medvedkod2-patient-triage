@@ -1,5 +1,7 @@
 # МедВед.Код2 · только backend
 
+Общий запуск frontend + API + PostgreSQL одной командой: [Docker](../../docs/DOCKER.md).
+
 Самостоятельная часть FastAPI для интеграции в monorepo `SanoEnger/medvedkod2-patient-triage`.
 API подключён к PostgreSQL; JSON хранится зашифрованным, сервер принимает HTTPS. Настройка БД, сертификатов и ключей: [README_POSTGRES.md](README_POSTGRES.md). Это не production medical device: только синтетические кейсы хакатона.
 
@@ -90,3 +92,7 @@ curl.exe --cacert ../../.local/runtime/ca.crt -s -X POST https://localhost:8443/
 ## Git workflow
 
 Файлы предназначены для feature-веток Вахрушева: API foundation, triage-safety, max-integration. Не копировать их в `main`/`develop` напрямую; при разнесении на три PR учитывать зависимость модулей. В этой поставке удалённого push или PR нет.
+
+## Необязательные поля опросника
+
+patient_context поддерживает lactation: boolean | null. medical_history поддерживает hospitalizations_last_year: list[str] с теми же ограничениями, что и операции: до 10 записей по 120 символов. Старые запросы остаются допустимыми; новые поля сохраняются в существующем зашифрованном JSON ответов. Правила срочности не менялись.

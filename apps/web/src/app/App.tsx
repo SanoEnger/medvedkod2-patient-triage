@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { HostContext, MaxHostAdapter } from '../max/MaxHostAdapter'
 import { ErrorState, LoadingState } from '../components/ScreenState'
 import { WelcomePage } from '../pages/WelcomePage'
-import { DemoPage } from '../pages/DemoPage'
+import { QuestionnairePage } from '../features/questionnaire/QuestionnairePage'
+import { createApiClient } from '../api/client'
+import { createMockClient } from '../api/mock'
 import { AppShell } from './AppShell'
 
 type LaunchState = { status: 'loading' } | { status: 'error' } | { status: 'ready'; context: HostContext }
@@ -10,8 +12,17 @@ type LaunchState = { status: 'loading' } | { status: 'error' } | { status: 'read
 export function App({ hostAdapter }: { hostAdapter?: MaxHostAdapter }) {
   const [launch, setLaunch] = useState<LaunchState>({ status: 'loading' })
   const [attempt, setAttempt] = useState(0)
-  const [page, setPage] = useState<'welcome' | 'demo'>('welcome')
+  const [page, setPage] = useState<'welcome' | 'survey'>('welcome')
   const focusAfterNavigation = useRef(false)
+  const mode = launch.status === 'ready' ? launch.context.mode : undefined
+  const mock = mode === 'demo' && (import.meta.env.VITE_SURVEY_MODE === 'mock'
+    || (!import.meta.env.VITE_SURVEY_MODE && !import.meta.env.VITE_API_ORIGIN))
+  const client = useMemo(() => {
+    if (!mode) return undefined
+    if (!mock) return createApiClient(mode)
+    const scenario = new URLSearchParams(window.location.search).get('scenario')
+    return createMockClient(scenario === 'emergency' || scenario === 'unknown' ? scenario : 'planned')
+  }, [mode, mock])
 
   useEffect(() => {
     let active = true
@@ -29,24 +40,21 @@ export function App({ hostAdapter }: { hostAdapter?: MaxHostAdapter }) {
       window.scrollTo(0, 0)
     }
   }, [page])
-
-  function navigate(next: 'welcome' | 'demo') {
+  function navigate(next: 'welcome' | 'survey') {
     focusAfterNavigation.current = true
     setPage(next)
   }
-
   const retry = () => {
     setLaunch({ status: 'loading' })
     setAttempt((value) => value + 1)
   }
-
-  return <AppShell mode={launch.status === 'ready' ? launch.context.mode : undefined}>
+  return <AppShell mode={mode}>
     {!hostAdapter || launch.status === 'error'
       ? <ErrorState missingHost={!hostAdapter} hostLaunch={hostAdapter?.kind === 'host'} onRetry={retry} />
       : launch.status === 'loading'
         ? <LoadingState />
         : page === 'welcome'
-          ? <WelcomePage onOpenDemo={() => navigate('demo')} />
-          : <DemoPage onBack={() => navigate('welcome')} />}
+          ? <WelcomePage onStart={() => navigate('survey')} />
+          : client && <QuestionnairePage client={client} mock={mock} onHome={() => navigate('welcome')} />}
   </AppShell>
 }
