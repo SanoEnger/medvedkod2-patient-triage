@@ -1,23 +1,25 @@
-"""Concurrent-safe, disposable demo session repository and questionnaire engine.
-
-Only the repository implementation is temporary. Replace it with the
-PostgreSQL-backed repository from the database owner before multi-worker deploy.
-"""
+"""Questionnaire rules with transactional storage."""
 
 import asyncio
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
 import hashlib
 import json
-from typing import Any
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app.schemas.survey import (
-    QUESTIONS, QUESTION_MODELS, AnswerRequest, Progress, SessionResponse,
-    SurveyStatus, TriageResponse,
+    QUESTION_MODELS,
+    QUESTIONS,
+    AnswerRequest,
+    Progress,
+    SessionResponse,
+    SurveyStatus,
+    TriageResponse,
 )
 from app.services.safety import find_emergency_rules
 from app.integrations.groq import SymptomExtractor
@@ -45,28 +47,54 @@ class Survey:
     revision: int = 0
 
 
-class SessionService:
-    """Isolated application service with an in-memory repository for local demos."""
+class SurveyStore(Protocol):
+    async def create(self, owner_id: str, ttl_seconds: int) -> Survey: ...
+    def open(self, session_id: UUID, owner_id: str) -> AbstractAsyncContextManager[Survey]: ...
+    async def delete(self, session_id: UUID, owner_id: str) -> None: ...
 
-    def __init__(self, ttl_seconds: int = 86400, *, extractor: SymptomExtractor | None = None) -> None:
-        self._extractor = extractor
-        self._ttl_seconds = ttl_seconds
+
+class MemorySurveyStore:
+    """Explicit offline test store; the running API uses PostgreSQL."""
+    def __init__(self):
         self._sessions: dict[UUID, Survey] = {}
         self._lock = asyncio.Lock()
 
-    def _cleanup(self) -> None:
-        now = datetime.now(timezone.utc)
+    def _cleanup(self):
+        now = datetime.now(UTC)
         for sid in [sid for sid, obj in self._sessions.items() if obj.expires_at <= now]:
             del self._sessions[sid]
 
-    def _get(self, session_id: UUID, owner_id: str) -> Survey:
-        self._cleanup()
-        survey = self._sessions.get(session_id)
-        if survey is None:
-            raise HTTPException(status_code=404, detail="session_not_found")
-        if survey.owner_id != owner_id:
-            raise HTTPException(status_code=403, detail="session_forbidden")
-        return survey
+    async def create(self, owner_id: str, ttl_seconds: int) -> Survey:
+        async with self._lock:
+            self._cleanup()
+            now = datetime.now(UTC)
+            survey = Survey(id=uuid4(), owner_id=owner_id, created_at=now,
+                            expires_at=now + timedelta(seconds=ttl_seconds))
+            self._sessions[survey.id] = survey
+            return survey
+
+    @asynccontextmanager
+    async def open(self, session_id: UUID, owner_id: str):
+        async with self._lock:
+            self._cleanup()
+            survey = self._sessions.get(session_id)
+            if survey is None:
+                raise HTTPException(status_code=404, detail="session_not_found")
+            if survey.owner_id != owner_id:
+                raise HTTPException(status_code=403, detail="session_forbidden")
+            yield survey
+
+    async def delete(self, session_id: UUID, owner_id: str) -> None:
+        async with self.open(session_id, owner_id):
+            del self._sessions[session_id]
+
+
+class SessionService:
+    """Questionnaire engine with transactional storage."""
+    def __init__(self, ttl_seconds: int = 86400, store: SurveyStore | None = None, *, extractor: SymptomExtractor | None = None) -> None:
+        self._extractor = extractor
+        self._ttl_seconds = ttl_seconds
+        self._store = store or MemorySurveyStore()
 
     @staticmethod
     def _progress(survey: Survey) -> Progress:
@@ -83,8 +111,7 @@ class SessionService:
             expires_at=survey.expires_at.isoformat(), emergency=is_emergency,
             urgency="EMERGENCY" if is_emergency else None,
             message=EMERGENCY_MESSAGE if is_emergency else None,
-            matched_rule_codes=survey.rule_codes.copy(), result=survey.result,
-            nlp=survey.nlp.copy(),
+            matched_rule_codes=survey.rule_codes.copy(), result=survey.result, nlp=survey.nlp.copy(),
         )
 
     @staticmethod
@@ -142,19 +169,11 @@ class SessionService:
         )
 
     async def create(self, owner_id: str) -> SessionResponse:
-        async with self._lock:
-            self._cleanup()
-            now = datetime.now(timezone.utc)
-            survey = Survey(
-                id=uuid4(), owner_id=owner_id, created_at=now,
-                expires_at=now + timedelta(seconds=self._ttl_seconds),
-            )
-            self._sessions[survey.id] = survey
-            return self._serialize(survey)
+        return self._serialize(await self._store.create(owner_id, self._ttl_seconds))
 
     async def get(self, session_id: UUID, owner_id: str) -> SessionResponse:
-        async with self._lock:
-            return self._serialize(self._get(session_id, owner_id))
+        async with self._store.open(session_id, owner_id) as survey:
+            return self._serialize(survey)
 
     async def answer(self, session_id: UUID, owner_id: str, request: AnswerRequest) -> SessionResponse:
         """Run safety first; enrich outside the repository lock, without changing urgency.
@@ -170,25 +189,20 @@ class SessionService:
         if not isinstance(text, str) or not text.strip():
             return response
         extraction = await self._extractor.extract(text)
-        async with self._lock:
-            survey = self._get(session_id, owner_id)
+        async with self._store.open(session_id, owner_id) as survey:
             if survey.revision == revision and survey.status != SurveyStatus.EMERGENCY_STOP:
                 survey.nlp[request.question_key] = extraction
                 survey.rule_codes = find_emergency_rules(survey.answers)
                 if survey.rule_codes:
                     survey.status = SurveyStatus.EMERGENCY_STOP
                     survey.result = self._triage(survey).model_dump()
-                response = self._serialize(survey)
-                key = str(request.idempotency_key)
-                payload_hash, _ = survey.idempotency[key]
-                survey.idempotency[key] = (payload_hash, response.model_dump(mode="json"))
-            else:
-                response = self._serialize(survey)
+                # The accepted-answer snapshot is immutable for idempotency,
+                # including retries from other workers during enrichment.
+                # GET exposes the latest persisted NLP result.
         return response
 
     async def _answer(self, session_id: UUID, owner_id: str, request: AnswerRequest) -> tuple[SessionResponse, int | None]:
-        async with self._lock:
-            survey = self._get(session_id, owner_id)
+        async with self._store.open(session_id, owner_id) as survey:
             payload_hash = hashlib.sha256(json.dumps(
                 {"question_key": request.question_key, "value": request.value},
                 sort_keys=True, ensure_ascii=False, separators=(",", ":"),
@@ -218,8 +232,7 @@ class SessionService:
             return response, survey.revision
 
     async def back(self, session_id: UUID, owner_id: str, target_step: int) -> SessionResponse:
-        async with self._lock:
-            survey = self._get(session_id, owner_id)
+        async with self._store.open(session_id, owner_id) as survey:
             if survey.status == SurveyStatus.EMERGENCY_STOP:
                 raise HTTPException(status_code=409, detail="emergency_requires_new_session")
             if survey.status not in (SurveyStatus.COLLECTING, SurveyStatus.REVIEWING, SurveyStatus.COMPLETED):
@@ -238,8 +251,7 @@ class SessionService:
             return self._serialize(survey)
 
     async def triage(self, session_id: UUID, owner_id: str) -> TriageResponse:
-        async with self._lock:
-            survey = self._get(session_id, owner_id)
+        async with self._store.open(session_id, owner_id) as survey:
             survey.rule_codes = find_emergency_rules(survey.answers)
             if survey.rule_codes:
                 survey.status = SurveyStatus.EMERGENCY_STOP
@@ -250,6 +262,4 @@ class SessionService:
             return result
 
     async def delete(self, session_id: UUID, owner_id: str) -> None:
-        async with self._lock:
-            self._get(session_id, owner_id)
-            del self._sessions[session_id]
+        await self._store.delete(session_id, owner_id)

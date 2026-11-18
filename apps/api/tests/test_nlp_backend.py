@@ -28,8 +28,9 @@ class CountingClient(MockGroqClient):
 
 
 def setup(client):
-    app = create_app(Settings(demo_mode=True, session_signing_key="x" * 40), extractor=SymptomExtractor(client))
-    return TestClient(app)
+    app = create_app(Settings(demo_mode=True, session_signing_key="x" * 40),
+                     session_service=SessionService(extractor=SymptomExtractor(client)))
+    return TestClient(app, base_url="https://testserver")
 
 
 def start(c):
@@ -53,11 +54,12 @@ def test_extract_get_retry_back():
         key = str(uuid4())
         r = answer(c, sid, headers, 'Кашель 2 дня', key)
         assert r.status_code == 200
-        assert r.json()['nlp']['primary_complaint']['symptoms'][0]['code'] == 'cough'
+        latest = c.get(f'/api/v1/sessions/{sid}', headers=headers).json()
+        assert latest['nlp']['primary_complaint']['symptoms'][0]['code'] == 'cough'
         assert r.json()['emergency'] is False
         assert answer(c, sid, headers, 'Кашель 2 дня', key).json() == r.json()
         assert provider.calls == 1
-        assert c.get(f'/api/v1/sessions/{sid}', headers=headers).json()['nlp'] == r.json()['nlp']
+        assert c.get(f'/api/v1/sessions/{sid}', headers=headers).json()['nlp'] == latest['nlp']
         back = c.post(f'/api/v1/sessions/{sid}/back', headers=headers, json={"target_step": 0})
         assert back.json()['nlp'] == {}
 
@@ -77,7 +79,7 @@ def test_timeout_keeps_fallback_unknown():
         sid, headers = start(c)
         r = answer(c, sid, headers, 'Кашель')
         assert r.status_code == 200
-        nlp = r.json()['nlp']['primary_complaint']
+        nlp = c.get(f'/api/v1/sessions/{sid}', headers=headers).json()['nlp']['primary_complaint']
         assert nlp['source'] == 'fallback' and nlp['fallback_reason'] == 'timeout'
         triage = c.post(f'/api/v1/sessions/{sid}/triage', headers=headers)
         assert triage.json()['urgency'] == 'UNKNOWN'
@@ -108,6 +110,7 @@ def test_slow_provider_does_not_block_other_sessions_or_restore_back():
         assert second.id != first.id
         await service.back(first.id, 'one', 0)
         release.set()
-        result = await task
+        await task
+        result = await service.get(first.id, 'one')
         assert result.nlp == {} and result.progress.answered == 0
     asyncio.run(scenario())
