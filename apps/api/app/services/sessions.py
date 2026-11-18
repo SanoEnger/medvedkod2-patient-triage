@@ -20,6 +20,8 @@ from app.schemas.survey import (
     SurveyStatus, TriageResponse,
 )
 from app.services.safety import find_emergency_rules
+from app.integrations.groq import SymptomExtractor
+from app.integrations.groq.schemas import ExtractionResult
 
 EMERGENCY_MESSAGE = "Вызовите скорую помощь (103/112). Не ждите окончания опроса."
 DISCLAIMER = (
@@ -39,12 +41,15 @@ class Survey:
     idempotency: dict[str, tuple[str, dict[str, Any]]] = field(default_factory=dict)
     rule_codes: list[str] = field(default_factory=list)
     result: dict[str, Any] | None = None
+    nlp: dict[str, ExtractionResult] = field(default_factory=dict)
+    revision: int = 0
 
 
 class SessionService:
     """Isolated application service with an in-memory repository for local demos."""
 
-    def __init__(self, ttl_seconds: int = 86400) -> None:
+    def __init__(self, ttl_seconds: int = 86400, *, extractor: SymptomExtractor | None = None) -> None:
+        self._extractor = extractor
         self._ttl_seconds = ttl_seconds
         self._sessions: dict[UUID, Survey] = {}
         self._lock = asyncio.Lock()
@@ -79,6 +84,7 @@ class SessionService:
             urgency="EMERGENCY" if is_emergency else None,
             message=EMERGENCY_MESSAGE if is_emergency else None,
             matched_rule_codes=survey.rule_codes.copy(), result=survey.result,
+            nlp=survey.nlp.copy(),
         )
 
     @staticmethod
@@ -151,6 +157,36 @@ class SessionService:
             return self._serialize(self._get(session_id, owner_id))
 
     async def answer(self, session_id: UUID, owner_id: str, request: AnswerRequest) -> SessionResponse:
+        """Run safety first; enrich outside the repository lock, without changing urgency.
+
+        Optimistic revision check discards late results after back/edit/delete.
+        Idempotent retries do not replay the provider request.
+        """
+        response, revision = await self._answer(session_id, owner_id, request)
+        if revision is None or response.emergency or self._extractor is None:
+            return response
+        field = {"primary_complaint": "text", "symptom_details": "additional_text"}.get(request.question_key)
+        text = request.value.get(field, "") if field else ""
+        if not isinstance(text, str) or not text.strip():
+            return response
+        extraction = await self._extractor.extract(text)
+        async with self._lock:
+            survey = self._get(session_id, owner_id)
+            if survey.revision == revision and survey.status != SurveyStatus.EMERGENCY_STOP:
+                survey.nlp[request.question_key] = extraction
+                survey.rule_codes = find_emergency_rules(survey.answers)
+                if survey.rule_codes:
+                    survey.status = SurveyStatus.EMERGENCY_STOP
+                    survey.result = self._triage(survey).model_dump()
+                response = self._serialize(survey)
+                key = str(request.idempotency_key)
+                payload_hash, _ = survey.idempotency[key]
+                survey.idempotency[key] = (payload_hash, response.model_dump(mode="json"))
+            else:
+                response = self._serialize(survey)
+        return response
+
+    async def _answer(self, session_id: UUID, owner_id: str, request: AnswerRequest) -> tuple[SessionResponse, int | None]:
         async with self._lock:
             survey = self._get(session_id, owner_id)
             payload_hash = hashlib.sha256(json.dumps(
@@ -162,13 +198,14 @@ class SessionService:
                 previous_hash, previous_response = survey.idempotency[key]
                 if previous_hash != payload_hash:
                     raise HTTPException(status_code=409, detail="idempotency_conflict")
-                return SessionResponse.model_validate(previous_response)
+                return SessionResponse.model_validate(previous_response), None
             if survey.status != SurveyStatus.COLLECTING:
                 raise HTTPException(status_code=409, detail="session_not_collecting")
             expected = QUESTIONS[len(survey.answers)]
             if request.question_key != expected:
                 raise HTTPException(status_code=409, detail="unexpected_question")
             survey.answers[expected] = self._validate(expected, request.value)
+            survey.revision += 1
             survey.rule_codes = find_emergency_rules(survey.answers)
             if survey.rule_codes:
                 survey.status = SurveyStatus.EMERGENCY_STOP
@@ -178,7 +215,7 @@ class SessionService:
                 survey.result = self._triage(survey).model_dump()
             response = self._serialize(survey)
             survey.idempotency[key] = (payload_hash, response.model_dump(mode="json"))
-            return response
+            return response, survey.revision
 
     async def back(self, session_id: UUID, owner_id: str, target_step: int) -> SessionResponse:
         async with self._lock:
@@ -191,6 +228,8 @@ class SessionService:
                 raise HTTPException(status_code=409, detail="invalid_target_step")
             for question in QUESTIONS[target_step:]:
                 survey.answers.pop(question, None)
+                survey.nlp.pop(question, None)
+            survey.revision += 1
             # Prior idempotency responses must never resurrect outdated triage results.
             survey.idempotency.clear()
             survey.result = None

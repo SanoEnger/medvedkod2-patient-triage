@@ -10,9 +10,11 @@ from app.core.config import Settings
 from app.core.rate_limit import LocalRateLimiter
 from app.integrations.max_core import MaxCoreClient
 from app.services.sessions import SessionService
+from app.integrations.groq import GroqClient, GroqSettings, MockGroqClient, SymptomExtractor
 
 
-def create_app(settings: Settings | None = None, max_core: MaxCoreClient | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, max_core: MaxCoreClient | None = None,
+               extractor: SymptomExtractor | None = None) -> FastAPI:
     """Construct an isolated backend. Dependencies may be injected in tests."""
     settings = settings or Settings.from_env()
     settings.validate()
@@ -23,7 +25,10 @@ def create_app(settings: Settings | None = None, max_core: MaxCoreClient | None 
     )
     app.state.settings = settings
     app.state.max_core = max_core or MaxCoreClient(settings)
-    app.state.sessions = SessionService(settings.survey_ttl_seconds)
+    extractor = extractor or SymptomExtractor(
+        GroqClient(GroqSettings.from_env()) if settings.nlp_mode == "live" else MockGroqClient()
+    )
+    app.state.sessions = SessionService(settings.survey_ttl_seconds, extractor=extractor)
     app.state.launch_limiter = LocalRateLimiter()
     if settings.cors_origins:
         app.add_middleware(

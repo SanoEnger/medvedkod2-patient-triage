@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 import os
+from app.environment import load_local_environment
 
 
 def _csv(value: str) -> tuple[str, ...]:
@@ -19,9 +20,11 @@ class Settings:
     auth_ttl_seconds: int = 3600
     survey_ttl_seconds: int = 86400
     core_timeout_seconds: float = 6.0
+    nlp_mode: str = "mock"
 
     @classmethod
     def from_env(cls) -> "Settings":
+        load_local_environment()
         return cls(
             core_url=os.getenv("CORE_URL", cls.core_url).rstrip("/"),
             core_service_token=os.getenv("CORE_SERVICE_TOKEN", ""),
@@ -32,9 +35,12 @@ class Settings:
             auth_ttl_seconds=int(os.getenv("AUTH_TTL_SECONDS", "3600")),
             survey_ttl_seconds=min(int(os.getenv("SURVEY_TTL_SECONDS", "86400")), 86400),
             core_timeout_seconds=float(os.getenv("CORE_TIMEOUT_SECONDS", "6")),
+            nlp_mode=os.getenv("NLP_MODE", "mock"),
         )
 
     def validate(self) -> None:
+        if self.nlp_mode not in ("mock", "live"):
+            raise ValueError("NLP_MODE must be mock or live")
         if not self.session_signing_key or len(self.session_signing_key) < 32:
             raise ValueError("SESSION_SIGNING_KEY must contain at least 32 characters")
         if self.auth_ttl_seconds < 60 or self.auth_ttl_seconds > 86400:

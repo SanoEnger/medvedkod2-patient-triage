@@ -10,6 +10,7 @@ import httpx
 
 from .exceptions import GroqError, GroqTimeout, InvalidResponse
 from .prompts import SYSTEM_PROMPT
+from app.environment import load_local_environment
 
 
 class CompletionClient(Protocol):
@@ -30,6 +31,7 @@ class GroqSettings:
 
     @classmethod
     def from_env(cls) -> "GroqSettings":
+        load_local_environment()
         return cls(
             api_key=os.getenv("GROQ_API_KEY", ""),
             model=os.getenv("GROQ_MODEL", ""),
