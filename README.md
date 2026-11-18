@@ -5,14 +5,16 @@
 безопасности, MAX server-to-server adapter и автономный Groq NLP-модуль.
 
 Это демонстрационный прототип для синтетических данных. Frontend пока не вызывает
-backend, а SessionService пока не подключает Groq. PostgreSQL и полноценный
-пользовательский опросник ещё не реализованы. Наличие компонентов в одной ветке
+backend, а SessionService пока не подключает Groq. API хранит сессии, ответы,
+результаты и переписку в PostgreSQL с шифрованием JSON и обязательным TLS.
+Полноценный пользовательский опросник ещё не завершён. Наличие компонентов в одной ветке
 не означает готовность медицинского сервиса или сквозной интеграции MAX.
 
 ## Компоненты и запуск
 
+- [PostgreSQL](apps/api/README_POSTGRES.md): схема, Alembic, TTL и отдельная тестовая БД.
 - [Backend и API](apps/api/README_BACKEND.md) — конфигурация, запуск сервера,
-  in-memory сессии и правила безопасности.
+  сессии PostgreSQL и правила безопасности.
 - [Groq NLP](apps/api/README.md) — установка, mock, fallback и формат извлечения.
 - [React UI](apps/web/README.md) — запуск, demo/production-сборки и браузерные тесты.
 - [MAX](apps/api/MAX_INTEGRATION.md) — границы серверной проверки host-токена.

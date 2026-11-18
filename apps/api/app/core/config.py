@@ -1,7 +1,7 @@
 """Backend environment settings. No secrets are placed in source control."""
 
-from dataclasses import dataclass, field
 import os
+from dataclasses import dataclass, field
 
 
 def _csv(value: str) -> tuple[str, ...]:
@@ -19,6 +19,13 @@ class Settings:
     auth_ttl_seconds: int = 3600
     survey_ttl_seconds: int = 86400
     core_timeout_seconds: float = 6.0
+    database_url: str = field(default="", repr=False)
+    database_ssl_ca_file: str = ""
+    data_encryption_key_file: str = field(default="", repr=False)
+    api_tls_cert_file: str = ""
+    api_tls_key_file: str = field(default="", repr=False)
+    api_host: str = "127.0.0.1"
+    api_port: int = 8443
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -32,6 +39,13 @@ class Settings:
             auth_ttl_seconds=int(os.getenv("AUTH_TTL_SECONDS", "3600")),
             survey_ttl_seconds=min(int(os.getenv("SURVEY_TTL_SECONDS", "86400")), 86400),
             core_timeout_seconds=float(os.getenv("CORE_TIMEOUT_SECONDS", "6")),
+            database_url=os.getenv("DATABASE_URL", ""),
+            database_ssl_ca_file=os.getenv("DATABASE_SSL_CA_FILE", ""),
+            data_encryption_key_file=os.getenv("DATA_ENCRYPTION_KEY_FILE", ""),
+            api_tls_cert_file=os.getenv("API_TLS_CERT_FILE", ""),
+            api_tls_key_file=os.getenv("API_TLS_KEY_FILE", ""),
+            api_host=os.getenv("API_HOST", "127.0.0.1"),
+            api_port=int(os.getenv("API_PORT", "8443")),
         )
 
     def validate(self) -> None:

@@ -1,7 +1,7 @@
 # МедВед.Код2 · только backend
 
 Самостоятельная часть FastAPI для интеграции в monorepo `SanoEnger/medvedkod2-patient-triage`.
-**Не содержит React, PostgreSQL-схем и миграций, Groq-клиента или NLP-модели.** Это не production medical device: только синтетические кейсы хакатона.
+API подключён к PostgreSQL; JSON хранится зашифрованным, сервер принимает HTTPS. Настройка БД, сертификатов и ключей: [README_POSTGRES.md](README_POSTGRES.md). Это не production medical device: только синтетические кейсы хакатона.
 
 ## Состав
 
@@ -25,16 +25,13 @@ python -m venv .venv
 pip install -r requirements-backend.txt
 ```
 
-Установить **свой случайный** `SESSION_SIGNING_KEY` длиной минимум 32 символа, не коммитить в git:
+Подготовьте PostgreSQL и сертификаты по [инструкции подключения](README_POSTGRES.md), примените миграции, затем запустите:
 
 ```powershell
-# Windows PowerShell, локальный демонстрационный режим
-$env:SESSION_SIGNING_KEY = python -c "import secrets; print(secrets.token_urlsafe(48))"
-$env:DEMO_MODE = 'true'
-python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+.\run_demo.ps1
 ```
 
-Swagger UI: http://127.0.0.1:8000/docs. Тесты: `python -m pytest -q tests`. В Windows также можно запускать `run_demo.ps1` и `test_backend.ps1` (после установки зависимостей).
+Swagger UI: https://localhost:8443/docs. Локальному браузеру нужно доверие к созданному CA. Backend-тесты: python -m pytest -q. Для проверки хранения, миграций и TLS нужны переменные отдельной тестовой БД из инструкции.
 
 Для реального MAX launch дополнительно задайте на сервере `CORE_SERVICE_TOKEN` из выданных организаторами секретов и установите `DEMO_MODE=false`. Описание всех переменных в `.env.backend.example`. **Сервисный токен никуда не отдаётся фронтенду.**
 
@@ -68,7 +65,7 @@ Swagger UI: http://127.0.0.1:8000/docs. Тесты: `python -m pytest -q tests`.
 ### Быстрая проверка без MAX
 
 ```bash
-curl -s -X POST http://127.0.0.1:8000/api/v1/auth/launch -H "Content-Type: application/json" -d '{"mode":"demo"}'
+curl.exe --cacert ../../.local/runtime/ca.crt -s -X POST https://localhost:8443/api/v1/auth/launch -H "Content-Type: application/json" -d '{"mode":"demo"}'
 ```
 
 Возьмите `access_token`, подставьте его в заголовок `Authorization: Bearer ...`, создайте сессию и отправьте первый ответ:
@@ -81,11 +78,11 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/auth/launch -H "Content-Type: appli
 
 ## Границы, важные до интеграции
 
-- Демо-хранилище `SessionService` работает **в памяти одного процесса**. При перезапуске ответы пропадут; несколько workers не поддерживаются. Смирнов подключает PostgreSQL-репозиторий и миграции отдельным PR; интерфейсы `SessionService` сохраняются.
+- API использует PostgreSQL: перезапуск сохраняет опрос и идемпотентность. Результаты вынесены в triage_results с версиями правил; изменения фиксируются в audit_events. JSON ответов, состояния, переписки, результатов, predicates и meta зашифрован AES-256-GCM. История пока доступна только через операции слоя БД; React и отдельные HTTP-методы истории здесь не добавляются.
 - NLP-модуль Волосникова в `app/integrations/groq/` **не вызывается**. Он не нужен для обязательной детерминированной остановки T01–T10; после согласования его можно вызвать **только после pre-safety и перед повторной post-safety**, не позволяя ему снижать срочность. Это отдельный интеграционный PR.
 - Для обычных случаев результат `UNKNOWN`, за исключением одного узкого синтетического `DEMO_SKIN_MILD_V0` с `PLANNED`. P1/P3 и клинические шаблоны не утверждены, поэтому самопомощь и несуществующие диагнозы не выдаются.
 - Лексический поиск ограничен. Это **не** медицинский триаж для реальных пациентов. Признаки T01–T10 протестированы только на синтетических формулировках; врач/ментор должен утвердить правила до реальных пользователей.
-- Сервис выдаёт собственные HMAC токены без списка отзыва. Для production желательно server-side session store / rotation / shared throttling на proxy. Локальный auth launch ограничен 20 попытками в минуту на IP в рамках одного процесса. TTL демо-сессий максимум 24 ч, cleanup ленивый (при обращении), реальных медицинских данных не принимать.
+- Сервис выдаёт собственные HMAC токены без списка отзыва. Для production желательно server-side session store / rotation / shared throttling на proxy. Локальный auth launch ограничен 20 попытками в минуту на IP в рамках одного процесса. TTL демо-сессий максимум 24 ч, cleanup выполняется API раз в минуту, реальных медицинских данных не принимать.
 - CSP `FRAME_ANCESTORS` и `CORS_ORIGINS` согласовать с MAX-host. Встроенному iframe не гарантирован доступ к cookie, поэтому выбран bearer header вместо cookie (CSRF для cookie здесь не нужен). В production HTTPS обязателен.
 - Не коммитить `.env`, сервисные токены, user JWT, Groq key, реальные медицинские данные. Секреты, жалобы и данные пользователя не логируются кодом приложения.
 - Пользовательское имя, возраст, пол и номер полиса из Core **не** используются/не сохраняются. Для детского температурного правила возраст в форме **синтетический**, а не дата рождения из Core.

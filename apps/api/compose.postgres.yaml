@@ -1,0 +1,40 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-medved}
+      POSTGRES_USER: ${POSTGRES_USER:-medved}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a private database password}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - type: bind
+        source: ${TLS_DIR:?Generate local TLS files first}/postgres.crt
+        target: /run/postgres.crt
+        read_only: true
+      - type: bind
+        source: ${TLS_DIR:?Generate local TLS files first}/postgres.key
+        target: /run/postgres.key
+        read_only: true
+      - type: bind
+        source: ./postgres/pg_hba.conf
+        target: /run/pg_hba.conf
+        read_only: true
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        cp /run/postgres.crt /tmp/postgres.crt
+        cp /run/postgres.key /tmp/postgres.key
+        chown postgres:postgres /tmp/postgres.crt /tmp/postgres.key
+        chmod 600 /tmp/postgres.key
+        exec docker-entrypoint.sh postgres -c ssl=on -c ssl_min_protocol_version=TLSv1.2 -c ssl_cert_file=/tmp/postgres.crt -c ssl_key_file=/tmp/postgres.key -c hba_file=/run/pg_hba.conf -c log_statement=none -c log_min_error_statement=panic -c log_error_verbosity=terse -c log_parameter_max_length_on_error=0
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres-data:
+

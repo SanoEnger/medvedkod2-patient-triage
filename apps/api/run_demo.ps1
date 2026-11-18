@@ -1,7 +1,4 @@
-# Run from this script's directory. Synthetic/offline demo mode only.
+param([string]$EnvFile = "$PSScriptRoot\..\..\.local\runtime\backend.env")
 Set-Location $PSScriptRoot
-if (-not $env:SESSION_SIGNING_KEY) {
-    $env:SESSION_SIGNING_KEY = python -c "import secrets; print(secrets.token_urlsafe(48))"
-}
 $env:DEMO_MODE = 'true'
-python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+python -m app.run_api --env-file $EnvFile
