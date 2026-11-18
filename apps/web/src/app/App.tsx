@@ -42,7 +42,7 @@ export function App({ hostAdapter }: { hostAdapter?: MaxHostAdapter }) {
 
   return <AppShell mode={launch.status === 'ready' ? launch.context.mode : undefined}>
     {!hostAdapter || launch.status === 'error'
-      ? <ErrorState missingHost={!hostAdapter} onRetry={retry} />
+      ? <ErrorState missingHost={!hostAdapter} hostLaunch={hostAdapter?.kind === 'host'} onRetry={retry} />
       : launch.status === 'loading'
         ? <LoadingState />
         : page === 'welcome'

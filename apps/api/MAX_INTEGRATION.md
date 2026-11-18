@@ -1,6 +1,8 @@
 # MAX mini-app: server-side authorization contract
 
-This repository contains **only the FastAPI backend**, not the web page opened from the MAX button.
+The repository contains the FastAPI backend and React frontend. The frontend now
+exchanges a launch JWT with this API; real Core/MAX and deployment verification
+remain required. See [Vercel setup](../../docs/VERCEL.md).
 
 ## Two distinct tokens
 
