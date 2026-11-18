@@ -4,5 +4,6 @@ export interface HostContext {
 
 // UI boundary only. Launch authentication belongs to the backend and host owners.
 export interface MaxHostAdapter {
+  readonly kind?: 'host'
   initialize(): Promise<HostContext>
 }

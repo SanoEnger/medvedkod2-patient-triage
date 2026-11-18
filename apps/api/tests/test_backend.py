@@ -1,19 +1,30 @@
 """API and red-flag tests; all scenarios are synthetic and fully offline."""
 
 import os
+
 os.environ.setdefault("SESSION_SIGNING_KEY", "unit-test-signing-key-longer-than-32-characters")
 
 from uuid import uuid4
 
 import httpx
 import pytest
-from fastapi.testclient import TestClient
-
 from app.core.config import Settings
 from app.core.security import issue_access_token, verify_access_token
 from app.integrations.max_core import MaxCoreClient
-from app.main import create_app
+from app.main import create_app as create_backend_app
 from app.services.safety import find_emergency_rules
+from app.services.sessions import SessionService
+from fastapi.testclient import TestClient
+
+
+def create_app(settings, max_core=None):
+    return create_backend_app(
+        settings, max_core, session_service=SessionService(settings.survey_ttl_seconds),
+    )
+
+
+def https_client(app):
+    return TestClient(app, base_url="https://testserver")
 
 
 @pytest.fixture
@@ -27,7 +38,7 @@ def app():
 
 @pytest.fixture
 def client(app):
-    with TestClient(app) as c:
+    with https_client(app) as c:
         yield c
 
 
@@ -189,7 +200,7 @@ def test_session_access_isolation_and_delete(client):
 
 def test_mock_mode_default_disabled():
     app = create_app(Settings(session_signing_key="x" * 40, demo_mode=False))
-    with TestClient(app) as c:
+    with https_client(app) as c:
         assert c.post("/api/v1/auth/launch", json={"mode": "demo"}).status_code == 401
         assert c.post("/api/v1/auth/launch", json={"mode": "host", "host_token": "x"}).status_code == 503
 
@@ -212,7 +223,7 @@ def test_host_launch_response_codes(code):
     settings = Settings(session_signing_key="z" * 40, core_service_token="service-synthetic")
     mock = httpx.AsyncClient(transport=httpx.MockTransport(fake_core))
     app = create_app(settings, MaxCoreClient(settings, mock))
-    with TestClient(app) as c:
+    with https_client(app) as c:
         r = c.post("/api/v1/auth/launch", json={"mode": "host", "host_token": "short-user-jwt"})
         assert r.status_code == (401 if code in (401, 404) else 503)
         assert "service-synthetic" not in r.text
@@ -228,7 +239,7 @@ def test_host_launch_success_discards_profile():
     settings = Settings(session_signing_key="z" * 40, core_service_token="service-synthetic")
     mock = httpx.AsyncClient(transport=httpx.MockTransport(fake_core))
     app = create_app(settings, MaxCoreClient(settings, mock))
-    with TestClient(app) as c:
+    with https_client(app) as c:
         r = c.post("/api/v1/auth/launch", json={"mode": "host", "host_token": "short-user-jwt"})
         assert r.status_code == 200
         assert "SNILS" not in r.text
@@ -256,7 +267,7 @@ def test_no_clinical_diagnosis_or_prescriptions_in_openapi(client):
 
 def test_launch_rate_limit_is_enforced(app):
     app.state.launch_limiter.limit = 2
-    with TestClient(app) as c:
+    with https_client(app) as c:
         assert c.post("/api/v1/auth/launch", json={"mode": "demo"}).status_code == 200
         assert c.post("/api/v1/auth/launch", json={"mode": "demo"}).status_code == 200
         assert c.post("/api/v1/auth/launch", json={"mode": "demo"}).status_code == 429
@@ -292,7 +303,7 @@ def test_bad_host_payload_never_mints_access_token():
 
     settings = Settings(session_signing_key="z" * 40, core_service_token="service-synthetic")
     app = create_app(settings, MaxCoreClient(settings, httpx.AsyncClient(transport=httpx.MockTransport(fake_core))))
-    with TestClient(app) as c:
+    with https_client(app) as c:
         r = c.post("/api/v1/auth/launch", json={"mode": "host", "host_token": "token"})
         assert r.status_code == 503
         assert "access_token" not in r.text
@@ -305,7 +316,7 @@ def test_host_forbidden_service_token_gives_specific_error():
         return httpx.Response(403, json={"message": "denied"})
 
     settings = Settings(session_signing_key="x" * 48, core_service_token="synthetic-service-secret")
-    with TestClient(create_app(settings, MaxCoreClient(settings, httpx.AsyncClient(transport=httpx.MockTransport(fake_core))))) as c:
+    with https_client(create_app(settings, MaxCoreClient(settings, httpx.AsyncClient(transport=httpx.MockTransport(fake_core))))) as c:
         result = c.post("/api/v1/auth/launch", json={"mode": "host", "host_token": "synthetic-jwt"})
         assert result.status_code == 503
         assert result.json() == {"detail": "host_service_unauthorized"}

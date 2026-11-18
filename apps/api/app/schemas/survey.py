@@ -5,6 +5,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from app.integrations.groq.schemas import ExtractionResult
 
 
 class StrictModel(BaseModel):
@@ -111,6 +112,7 @@ class Progress(StrictModel):
 
 
 class SessionResponse(StrictModel):
+    nlp: dict[str, ExtractionResult] = Field(default_factory=dict)
     id: UUID
     status: SurveyStatus
     state: SurveyStatus
