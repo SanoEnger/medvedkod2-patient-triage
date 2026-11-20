@@ -13,19 +13,29 @@ from app.db.nonces import delete_expired_nonces
 from app.schemas.survey import SurveyStatus
 
 
+async def lock_owner(db: AsyncSession, owner_id: str) -> None:
+    await db.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(owner_id, 0))))
+
+
 async def create_session(
     db: AsyncSession,
     owner_id: str,
     *,
     demo_mode: bool,
     ttl_seconds: int = 86400,
+    kind: str = "questionnaire",
     cipher: JsonCipher | None = None,
 ) -> SessionRecord:
     if not 0 < ttl_seconds <= 86400:
         raise ValueError("Session TTL must be between 1 and 86400 seconds")
+    await lock_owner(db, owner_id)
+    if kind not in ("questionnaire", "chat"):
+        raise ValueError("Invalid session kind")
     now = datetime.now(UTC)
     record = SessionRecord(
         owner_id=owner_id,
+        kind=kind,
+        status=SurveyStatus.COMPLETED if kind == "chat" else SurveyStatus.COLLECTING,
         demo_mode=demo_mode,
         created_at=now,
         expires_at=now + timedelta(seconds=ttl_seconds),
@@ -199,6 +209,7 @@ async def append_message(
     content: dict[str, Any],
     *,
     cipher: JsonCipher | None = None,
+    message_id: UUID | None = None,
 ) -> MessageRecord:
     if role not in ("assistant", "user", "system") or kind not in (
         "question",
@@ -215,7 +226,7 @@ async def append_message(
             MessageRecord.session_id == session_id
         ),
     )
-    identifier = uuid4()
+    identifier = message_id or uuid4()
     record = MessageRecord(
         id=identifier,
         session_id=session_id,

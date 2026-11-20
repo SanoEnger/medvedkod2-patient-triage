@@ -12,6 +12,8 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+from app.integrations.groq import SymptomExtractor
+from app.integrations.groq.schemas import ExtractionResult
 from app.schemas.survey import (
     QUESTION_MODELS,
     QUESTIONS,
@@ -22,8 +24,6 @@ from app.schemas.survey import (
     TriageResponse,
 )
 from app.services.safety import find_emergency_rules
-from app.integrations.groq import SymptomExtractor
-from app.integrations.groq.schemas import ExtractionResult
 
 EMERGENCY_MESSAGE = "Вызовите скорую помощь (103/112). Не ждите окончания опроса."
 DISCLAIMER = (
@@ -112,6 +112,7 @@ class SessionService:
             urgency="EMERGENCY" if is_emergency else None,
             message=EMERGENCY_MESSAGE if is_emergency else None,
             matched_rule_codes=survey.rule_codes.copy(), result=survey.result, nlp=survey.nlp.copy(),
+            answers=survey.answers.copy(),
         )
 
     @staticmethod
@@ -257,7 +258,7 @@ class SessionService:
                 survey.status = SurveyStatus.EMERGENCY_STOP
             result = self._triage(survey)
             survey.result = result.model_dump()
-            if result.urgency == "PLANNED" and survey.status == SurveyStatus.REVIEWING:
+            if survey.status == SurveyStatus.REVIEWING:
                 survey.status = SurveyStatus.COMPLETED
             return result
 

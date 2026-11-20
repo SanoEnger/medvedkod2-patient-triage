@@ -16,12 +16,12 @@ from app.core.encryption import (
 )
 from app.db.audit import record_audit
 from app.db.models import AnswerRecord, SessionRecord
-from app.db.repository import append_message, create_session, delete_session
+from app.db.repository import append_message, create_session, delete_session, lock_owner
 from app.db.results import delete_triage_result, get_triage_result, save_triage_result
 from app.db.safety_catalog import result_version
+from app.integrations.groq.schemas import ExtractionResult
 from app.schemas.survey import QUESTIONS, SurveyStatus
 from app.services.sessions import Survey
-from app.integrations.groq.schemas import ExtractionResult
 
 
 class PostgresSurveyStore:
@@ -80,6 +80,7 @@ class PostgresSurveyStore:
     @asynccontextmanager
     async def open(self, session_id: UUID, owner_id: str):
         async with self._transaction() as db:
+            await lock_owner(db, owner_id)
             record = await db.scalar(
                 select(SessionRecord)
                 .where(SessionRecord.id == session_id)
@@ -89,6 +90,8 @@ class PostgresSurveyStore:
                 raise HTTPException(status_code=404, detail="session_not_found")
             if record.owner_id != owner_id:
                 raise HTTPException(status_code=403, detail="session_forbidden")
+            if record.kind != "questionnaire":
+                raise HTTPException(status_code=404, detail="session_not_found")
             rows = list(
                 await db.scalars(
                     select(AnswerRecord)
@@ -231,4 +234,6 @@ class PostgresSurveyStore:
                 raise HTTPException(status_code=404, detail="session_not_found")
             if record.owner_id != owner_id:
                 raise HTTPException(status_code=403, detail="session_forbidden")
+            if record.kind != "questionnaire":
+                raise HTTPException(status_code=404, detail="session_not_found")
             await delete_session(db, session_id, owner_id, cipher=self._cipher)

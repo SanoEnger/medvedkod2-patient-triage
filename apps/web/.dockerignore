@@ -1,0 +1,12 @@
+node_modules
+dist
+test-results
+playwright-report
+tests
+src/**/*.test.*
+src/test
+.env*
+!.env.demo
+README.md
+playwright*.ts
+vitest.config.ts
