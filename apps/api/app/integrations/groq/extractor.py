@@ -8,6 +8,8 @@ from .client import CompletionClient, MockGroqClient
 from .exceptions import GroqError
 from .fallback import extract_local
 from .schemas import ExtractionResult, ModelExtraction
+from app.integrations.prompt_security import instruction_attack
+from app.core.observability import event
 
 
 class SymptomExtractor:
@@ -25,6 +27,9 @@ class SymptomExtractor:
         mode = "mock" if isinstance(self.client, MockGroqClient) else "live"
         local = extract_local(text)
         reason = "empty_input" if not text.strip() else None
+        if instruction_attack(text):
+            event("security.nlp_fallback", code="untrusted_instructions")
+            reason = "untrusted_instructions"
         model = None
         if reason is None:
             try:
