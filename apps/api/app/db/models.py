@@ -31,6 +31,7 @@ class SessionRecord(Base):
     __tablename__ = "sessions"
     __table_args__ = (
         CheckConstraint("step >= 0", name="ck_sessions_step"),
+        CheckConstraint("kind IN ('questionnaire', 'chat')", name="ck_sessions_kind"),
         CheckConstraint(
             "status IN ('COLLECTING', 'REVIEWING', 'COMPLETED', 'EMERGENCY_STOP', 'EXPIRED')",
             name="ck_sessions_status",
@@ -54,6 +55,7 @@ class SessionRecord(Base):
         server_default=text("gen_random_uuid()"),
     )
     owner_id: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, server_default="questionnaire")
     state_jsonb: Mapped[dict[str, Any] | None] = mapped_column(JSONB(), nullable=True)
     status: Mapped[SurveyStatus] = mapped_column(
         Enum(

@@ -8,9 +8,10 @@ from typing import Protocol
 
 import httpx
 
+from app.environment import load_local_environment
+
 from .exceptions import GroqError, GroqTimeout, InvalidResponse
 from .prompts import SYSTEM_PROMPT
-from app.environment import load_local_environment
 
 
 class CompletionClient(Protocol):
@@ -46,6 +47,12 @@ class GroqClient:
 
     async def complete(self, text: str) -> str:
         """One bounded request, no retries, no response bodies in errors or logs."""
+        return await self.respond([
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps({"complaint": text}, ensure_ascii=False)},
+        ])
+
+    async def respond(self, messages: list[dict[str, str]]) -> str:
         if not self.settings.api_key or not self.settings.model:
             raise GroqError("missing_configuration")
         failure = None
@@ -61,8 +68,7 @@ class GroqClient:
                         headers={"Authorization": f"Bearer {self.settings.api_key}"},
                         json={
                             "model": self.settings.model,
-                            "messages": [{"role": "system", "content": SYSTEM_PROMPT},
-                                         {"role": "user", "content": json.dumps({"complaint": text}, ensure_ascii=False)}],
+                            "messages": messages,
                             "response_format": {"type": "json_object"},
                             "temperature": 0,
                             "max_completion_tokens": 2048,
