@@ -5,6 +5,7 @@ from pydantic import Field, ValidationError
 from app.integrations.groq.client import GroqClient
 from app.integrations.groq.exceptions import InvalidResponse
 from app.integrations.groq.schemas import StrictModel
+from app.core.observability import event
 
 
 class AgentReply(StrictModel):
@@ -42,6 +43,7 @@ class ChatAgent:
         try:
             return AgentReply.model_validate_json(raw)
         except (ValidationError, ValueError, TypeError):
+            event("chat.invalid_model_response", code="invalid_response")
             raise InvalidResponse() from None
 
 

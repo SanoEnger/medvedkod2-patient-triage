@@ -1,5 +1,11 @@
 name: medved
 
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 x-api-image: &api-image
   image: medved-api:local
   build:
@@ -7,6 +13,7 @@ x-api-image: &api-image
 
 services:
   init:
+    logging: *logging
     <<: *api-image
     user: "0:0"
     command: ["python", "-m", "app.container", "init"]
@@ -17,6 +24,7 @@ services:
     restart: "no"
 
   postgres:
+    logging: *logging
     build:
       context: ./apps/api/postgres
     environment:
@@ -37,6 +45,7 @@ services:
     restart: unless-stopped
 
   api:
+    logging: *logging
     <<: *api-image
     env_file:
       - path: ./apps/api/.env
@@ -45,7 +54,6 @@ services:
         required: false
     environment:
       DEMO_MODE: ${DEMO_MODE:-true}
-      NLP_MODE: ${NLP_MODE:-mock}
       CORE_URL: ${CORE_URL:-https://tm-test-yakut.hostco.ru}
       CORE_SERVICE_TOKEN: ${CORE_SERVICE_TOKEN:-}
       FRAME_ANCESTORS: ${FRAME_ANCESTORS:-'self'}
@@ -63,6 +71,7 @@ services:
     restart: unless-stopped
 
   web:
+    logging: *logging
     build:
       context: ./apps/web
       args:
