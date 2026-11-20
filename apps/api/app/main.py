@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.api.chat_routes import router as chat_router
 from app.api.routes import router
 from app.core.config import Settings
+from app.core.observability import configure_logging, event, RequestLoggingMiddleware
 from app.core.encryption import JsonCipher
 from app.core.rate_limit import LocalRateLimiter
 from app.db.engine import create_engine
@@ -49,6 +50,7 @@ def create_app(
     chat_service: ChatService | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
+    configure_logging()
     settings.validate()
     extractor = extractor or SymptomExtractor(GroqClient(GroqSettings.from_env()) if settings.nlp_mode == "live" else MockGroqClient())
     engine = None
@@ -72,6 +74,7 @@ def create_app(
                         await db.execute(select(table).limit(0))
                     await verify_runtime_catalog(db, cipher)
                 task = asyncio.create_task(expire_sessions(factory, cipher))
+            event("application.ready", mode=settings.nlp_mode)
             yield
         finally:
             if task is not None:
@@ -80,6 +83,7 @@ def create_app(
                     await task
             if engine is not None:
                 await engine.dispose()
+            event("application.stopped")
 
     app = FastAPI(title="МедВед.Код2 backend",
                   description="Демонстрационный API для синтетических данных.",
@@ -93,6 +97,7 @@ def create_app(
         app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins),
                            allow_methods=["GET", "POST", "DELETE"],
                            allow_headers=["Authorization", "Content-Type"],
+                           expose_headers=["X-Request-ID"],
                            allow_credentials=False)
 
     @app.middleware("http")
@@ -121,4 +126,5 @@ def create_app(
 
     app.include_router(router)
     app.include_router(chat_router)
+    app.add_middleware(RequestLoggingMiddleware)
     return app

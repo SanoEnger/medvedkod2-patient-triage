@@ -42,5 +42,5 @@ class ExtractionResult(ModelExtraction):
     fallback_reason: Literal[
         "empty_input", "missing_configuration", "timeout", "network_error",
         "rate_limited", "server_error", "http_error", "invalid_response",
-        "provider_error",
+        "provider_error", "untrusted_instructions",
     ] | None = None

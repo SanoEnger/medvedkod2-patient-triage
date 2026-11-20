@@ -9,6 +9,7 @@ from typing import Protocol
 import httpx
 
 from app.environment import load_local_environment
+from app.core.observability import event
 
 from .exceptions import GroqError, GroqTimeout, InvalidResponse
 from .prompts import SYSTEM_PROMPT
@@ -54,7 +55,9 @@ class GroqClient:
 
     async def respond(self, messages: list[dict[str, str]]) -> str:
         if not self.settings.api_key or not self.settings.model:
+            event("groq.failed", code="missing_configuration")
             raise GroqError("missing_configuration")
+        event("groq.started")
         failure = None
         content = None
         try:
@@ -97,9 +100,11 @@ class GroqClient:
             failure = InvalidResponse()
         # Raise outside except blocks: provider exceptions cannot leak via context.
         if failure is not None:
+            event("groq.failed", code=failure.code)
             raise failure
         if content is None:
             raise InvalidResponse()
+        event("groq.completed")
         return content
 
 

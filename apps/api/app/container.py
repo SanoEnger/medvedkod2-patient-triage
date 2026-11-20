@@ -13,6 +13,7 @@ from dotenv import dotenv_values, load_dotenv
 from sqlalchemy.engine import make_url
 
 from app.core.local_setup import generate
+from app.core.observability import configure_logging, event
 
 RUNTIME = Path("/run/medved")
 POSTGRES_SECRETS = Path("/run/postgres-secrets")
@@ -70,8 +71,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("init", "serve", "health"))
     command = parser.parse_args().command
+    configure_logging()
     if command == "init":
+        event("container.init_started", service="init")
         initialize(RUNTIME, POSTGRES_SECRETS, WEB_SECRETS)
+        event("container.init_completed", service="init")
     elif command == "health":
         context = ssl.create_default_context(cafile=str(RUNTIME / "ca.crt"))
         with urlopen("https://localhost:8443/health", context=context, timeout=3) as response:
@@ -79,7 +83,9 @@ def main() -> None:
                 raise SystemExit(1)
     else:
         configure()
+        event("container.migrations_started", mode=os.getenv("NLP_MODE", "mock"))
         subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], check=True)
+        event("container.migrations_completed")
         os.execv(sys.executable, [sys.executable, "-m", "app.run_api"])
 
 

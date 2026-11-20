@@ -28,6 +28,7 @@ from app.schemas.chat import ChatMessage, ChatResponse
 from app.schemas.survey import SurveyStatus
 from app.services.safety import find_emergency_rules
 from app.services.sessions import EMERGENCY_MESSAGE
+from app.core.observability import event
 
 GREETING = "Здравствуйте! Я МедВед. Спросите, что вас беспокоит или что нужно уточнить перед обращением к врачу."
 FOLLOW_UP = "Я вижу ответы и результат вашего опроса. Что вы хотите уточнить?"
@@ -43,7 +44,8 @@ class ChatService:
         try:
             async with self.factory.begin() as db:
                 yield db
-        except (SQLAlchemyError, OSError, DataEncryptionError):
+        except (SQLAlchemyError, OSError, DataEncryptionError) as error:
+            event("chat.storage_failed", code="storage_unavailable", error_type=type(error).__name__)
             raise HTTPException(status_code=503, detail="chat_storage_unavailable") from None
 
     async def active_survey(self, db, owner):
@@ -176,15 +178,19 @@ class ChatService:
                     break
                 history.insert(0, {"role": row.role, "content": value["text"]})
                 size += len(value["text"])
+        event("chat.message_saved")
         try:
             answers = {**context.get("answers", {}),
                 "primary_complaint": {"text": request.text, "category": "other"}}
             emergency = bool(find_emergency_rules(answers))
             reply = AgentReply(text=EMERGENCY_MESSAGE, emergency=True) if emergency else await self.agent.reply(history, context)
+            event("chat.reply_validated", code="emergency" if reply.emergency else "regular")
             if reply.emergency:
                 # A model-triggered escalation uses the same reviewed message.
                 reply = AgentReply(text=EMERGENCY_MESSAGE, emergency=True)
         except (GroqError, asyncio.CancelledError) as error:
+            event("chat.reply_failed", code="cancelled" if isinstance(error, asyncio.CancelledError) else (
+                error.code if error.code in {"timeout", "network_error", "rate_limited", "server_error", "http_error", "invalid_response", "missing_configuration"} else "provider_error"))
             await self.clear_lease(identifier, message_id, owner)
             if isinstance(error, asyncio.CancelledError):
                 raise
@@ -198,7 +204,9 @@ class ChatService:
             if not await db.get(MessageRecord, reply_id):
                 await append_message(db, identifier, owner, "assistant", "text",
                     reply.model_dump(), cipher=self.cipher, message_id=reply_id)
-            return await self.response(db, record, owner)
+            response = await self.response(db, record, owner)
+        event("chat.reply_saved")
+        return response
 
     async def delete(self, identifier, owner):
         async with self.transaction() as db:

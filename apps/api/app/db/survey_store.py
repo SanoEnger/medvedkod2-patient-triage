@@ -22,6 +22,7 @@ from app.db.safety_catalog import result_version
 from app.integrations.groq.schemas import ExtractionResult
 from app.schemas.survey import QUESTIONS, SurveyStatus
 from app.services.sessions import Survey
+from app.core.observability import event
 
 
 class PostgresSurveyStore:
@@ -37,7 +38,8 @@ class PostgresSurveyStore:
         try:
             async with self._factory.begin() as db:
                 yield db
-        except (SQLAlchemyError, OSError, DataEncryptionError):
+        except (SQLAlchemyError, OSError, DataEncryptionError) as error:
+            event("storage.failed", code="storage_unavailable", error_type=type(error).__name__)
             raise HTTPException(status_code=503, detail="storage_unavailable") from None
 
     def _state(self, survey: Survey):

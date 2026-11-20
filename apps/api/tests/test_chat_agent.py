@@ -25,7 +25,8 @@ def test_chat_agent_sends_history_and_context_as_data():
         body = json.loads(request.content)
         assert body["messages"][0]["role"] == "system"
         assert json.loads(body["messages"][1]["content"])["questionnaire_context"]["result"]["urgency"] == "UNKNOWN"
-        assert body["messages"][-1] == {"role": "user", "content": "Что уточнить?"}
+        assert len(body["messages"]) == 2
+        assert json.loads(body["messages"][1]["content"])["conversation"] == [{"role": "user", "content": "Что уточнить?"}]
         return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {
             "content": json.dumps({"text": "Уточните длительность симптомов.", "emergency": False}),
         }}]})
