@@ -34,11 +34,7 @@ export function AppShell({
             МедВед<span className="brand-caption">навигатор пациента</span>
           </span>
         </a>
-        {mode && (
-          <span className="mode-badge">
-            {mode === "demo" ? "Демоверсия" : "MAX"}
-          </span>
-        )}
+        {mode === "max" && <span className="mode-badge">MAX</span>}
       </header>
       <div className="readability-controls">
         <Button

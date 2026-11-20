@@ -8,13 +8,13 @@ type Operation = {
   execute: (signal: AbortSignal, emit: (survey: Survey) => void) => Promise<Survey | undefined>
 }
 
-export function useQuestionnaire(client: SurveyClient) {
-  const [survey, setSurvey] = useState<Survey | null>(null)
+export function useQuestionnaire(client: SurveyClient, initial?: Survey | null) {
+  const [survey, setSurvey] = useState<Survey | null>(initial || null)
   const [error, setError] = useState<ApiError | null>(null)
   const [activity, setActivity] = useState<Operation['kind'] | null>(null)
-  const [emergency, setEmergency] = useState(false)
-  const current = useRef<Survey | null>(null)
-  const stopped = useRef(false)
+  const [emergency, setEmergency] = useState(!!initial && isEmergency(initial))
+  const current = useRef<Survey | null>(initial || null)
+  const stopped = useRef(!!initial && isEmergency(initial))
   const epoch = useRef(0)
   const busy = useRef(false)
   const abort = useRef<AbortController | null>(null)

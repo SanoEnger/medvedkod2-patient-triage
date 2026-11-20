@@ -1,4 +1,9 @@
 import { expect, test } from '@playwright/test'
+import { apiFixture } from './fixtures/survey'
+
+test.beforeEach(async ({ page }, info) => {
+  await apiFixture(page, { scenario: info.title.startsWith('emergency') ? 'emergency' : 'planned' })
+})
 import type { Locator, Page } from '@playwright/test'
 
 async function noOverflow(page: Page) {
@@ -24,7 +29,7 @@ for (const width of [320, 360, 390]) for (const scale of [1, 2]) {
   test('all survey screens, both modes at ' + width + 'px and ' + scale * 100 + '% text', async ({ page }) => {
     await page.setViewportSize({ width, height: 844 })
     await page.goto('/')
-    const toggle = page.getByRole('button', { name: 'Читаемость', exact: true })
+    const toggle = page.getByRole('button', { name: 'Версия для слабовидящих', exact: true })
     await page.getByRole('button', { name: 'Начать опрос', exact: true }).waitFor()
     await page.evaluate((scale) => { document.documentElement.style.fontSize = String(scale * 100) + '%' }, scale)
     const header = await page.locator('.site-header').boundingBox()
@@ -62,7 +67,7 @@ for (const width of [320, 360, 390]) for (const scale of [1, 2]) {
     await noOverflow(page)
     await page.getByRole('button', { name: 'Продолжить' }).click()
     await noOverflow(page)
-    await page.getByLabel('Госпитализации за последний год').fill('Synthetic admission')
+    await page.getByLabel('Госпитализации за последний год', { exact: true }).fill('Synthetic admission')
     await page.getByRole('button', { name: 'Сохранить ответы и посмотреть итог' }).click()
     await expect(page.getByRole('heading', { name: 'Результат опроса' })).toBeVisible()
     await noOverflow(page)
@@ -75,7 +80,7 @@ for (const width of [320, 360, 390]) for (const scale of [1, 2]) {
 
 test('enhanced contrast and keyboard toggle', async ({ page }) => {
   await page.goto('/')
-  const toggle = page.getByRole('button', { name: 'Читаемость', exact: true })
+  const toggle = page.getByRole('button', { name: 'Версия для слабовидящих', exact: true })
   await page.getByRole('button', { name: 'Начать опрос', exact: true }).waitFor()
   await page.keyboard.press('Tab'); await page.keyboard.press('Tab'); await page.keyboard.press('Tab')
   await expect(toggle).toBeFocused()
@@ -99,7 +104,7 @@ for (const width of [320, 390]) {
     await page.setViewportSize({ width, height: 844 })
     await page.goto('/?scenario=emergency')
     await page.getByRole('button', { name: 'Начать опрос', exact: true }).click()
-    await page.getByRole('button', { name: 'Читаемость', exact: true }).click()
+    await page.getByRole('button', { name: 'Версия для слабовидящих', exact: true }).click()
     await page.evaluate(() => { document.documentElement.style.fontSize = '200%' })
     await page.getByRole('checkbox', { name: /Я понимаю/ }).check()
     await page.getByRole('button', { name: 'Начать опрос', exact: true }).click()

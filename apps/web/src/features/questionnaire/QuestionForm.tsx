@@ -1,10 +1,10 @@
 import { useId, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Button, TextAreaField, TextField } from '../../components/ui'
+import { Button, SelectField, TextAreaField, TextField } from '../../components/ui'
 import { Icon } from '../../components/Icon'
 import type { IconName } from '../../components/Icon'
 import { HISTORY_FIELDS, RED_FLAGS } from '../../api/contracts'
-import type { AnswerRequest, Category, QuestionKey } from '../../api/contracts'
+import type { AnswerRequest, Category, QuestionKey, Sex } from '../../api/contracts'
 import { answerFromDraft, categories, flagLabels, historyLabels } from './fields'
 import type { Choice, Drafts } from './fields'
 
@@ -22,6 +22,24 @@ function Choices({ label, value, onChange }: { label: string; value: Choice; onC
         <input type="radio" name={name} value={key} checked={value === key} onChange={() => onChange(key)} />
         <span>{text}</span><Icon name="check" className="choice-check" />
       </label>)}</div>
+  </fieldset>
+}
+
+function HistoryField({ label, value, none, onNoneChange, onChange }: {
+  label: string; value: string; none: boolean
+  onNoneChange: (none: boolean) => void; onChange: (value: string) => void
+}) {
+  const id = useId()
+  return <fieldset className="field history-field">
+    <legend id={id + '-label'}>{label}</legend>
+    <label className="history-none">
+      <input type="checkbox" aria-label={'Нет: ' + label} checked={none} onChange={(event) => onNoneChange(event.target.checked)} />
+      <span>Нет</span>
+    </label>
+    {!none && <>
+      <textarea id={id} aria-labelledby={id + '-label'} aria-describedby={id + '-hint'} rows={3} maxLength={1300} value={value} onChange={(event) => onChange(event.target.value)} />
+      <p id={id + '-hint'} className="field-hint">До 10 записей: с новой строки или через точку с запятой. Каждая запись — до 120 символов.</p>
+    </>}
   </fieldset>
 }
 
@@ -58,14 +76,25 @@ export function QuestionForm({ question, drafts, onChange, onAnswer, disabled }:
         <TextAreaField label="Что беспокоит — своими словами" hint="Можно оставить пустым. До 1200 символов, без имени, телефона и адреса." maxLength={1200} rows={4} value={primary.text} onChange={(event) => update('primary_complaint', { ...primary, text: event.target.value })} />
       </>}
       {question === 'patient_context' && <>
+        <TextField label="Температура тела, °C" type="number" inputMode="decimal" min={30} max={45} step={0.1} value={patient.temperature_c} onChange={(event) => update('patient_context', { ...patient, temperature_c: event.target.value })} hint="Если не измеряли, оставьте поле пустым." />
         <div className="field-grid">
           <TextField label="Возраст в полных годах" type="number" inputMode="numeric" min={0} max={120} step={1} value={patient.age_years} onChange={(event) => update('patient_context', { ...patient, age_years: event.target.value })} hint="Если возраст неизвестен, оставьте поле пустым." />
-          <TextField label="Температура тела, °C" type="number" inputMode="decimal" min={30} max={45} step={0.1} value={patient.temperature_c} onChange={(event) => update('patient_context', { ...patient, temperature_c: event.target.value })} hint="Если не измеряли, оставьте поле пустым." />
+          <SelectField label="Пол" value={patient.sex} onChange={(event) => {
+            const sex = event.target.value as Sex | ''
+            update('patient_context', { ...patient, sex,
+              ...(sex !== 'female' ? { pregnancy: 'unknown', lactation: 'unknown' } as const : {}) })
+          }}>
+            <option value="">Не указан</option>
+            <option value="male">Мужской</option>
+            <option value="female">Женский</option>
+          </SelectField>
+          <TextField label="Рост, см" type="number" inputMode="decimal" min={1} max={300} step={0.1} value={patient.height_cm} onChange={(event) => update('patient_context', { ...patient, height_cm: event.target.value })} hint="Если рост неизвестен, оставьте поле пустым." />
+          <TextField label="Вес, кг" type="number" inputMode="decimal" min={0.1} max={1000} step={0.1} value={patient.weight_kg} onChange={(event) => update('patient_context', { ...patient, weight_kg: event.target.value })} hint="Если вес неизвестен, оставьте поле пустым." />
         </div>
-        <details className="optional-fields"><summary>Беременность и лактация — если актуально</summary>
-          <Choices label="Беременность" value={patient.pregnancy} onChange={(value) => update('patient_context', { ...patient, pregnancy: value })} />
-          <Choices label="Лактация" value={patient.lactation} onChange={(value) => update('patient_context', { ...patient, lactation: value })} />
-        </details>
+        {patient.sex === 'female' && <div className="optional-fields" role="group" aria-label="Беременность и лактация">
+          <Choices label="Есть ли беременность?" value={patient.pregnancy} onChange={(value) => update('patient_context', { ...patient, pregnancy: value })} />
+          <Choices label="Есть ли грудное вскармливание?" value={patient.lactation} onChange={(value) => update('patient_context', { ...patient, lactation: value })} />
+        </div>}
       </>}
       {question === 'symptom_details' && <>
         <TextField label="Где ощущаются симптомы?" maxLength={120} value={details.location} onChange={(event) => update('symptom_details', { ...details, location: event.target.value })} hint="Необязательно. До 120 символов." />
@@ -84,11 +113,14 @@ export function QuestionForm({ question, drafts, onChange, onAnswer, disabled }:
           }} />)}</div>
       </>}
       {question === 'medical_history' && <>
-        <p className="question-note">Заполните то, что известно. Поля можно оставить пустыми. Используйте только вымышленные сведения.</p>
-        {HISTORY_FIELDS.map((key) => <TextAreaField key={key} label={historyLabels[key]}
-          hint="До 10 записей: с новой строки или через точку с запятой. Каждая запись — до 120 символов."
-          rows={3} maxLength={1300} value={drafts.medical_history[key]}
-          onChange={(event) => update('medical_history', { ...drafts.medical_history, [key]: event.target.value })} />)}
+        <p className="question-note">Заполните то, что известно. Поля можно оставить пустыми.</p>
+        {HISTORY_FIELDS.map((key) => <HistoryField key={key} label={historyLabels[key]}
+          value={drafts.medical_history[key]} none={drafts.history_none[key]}
+          onNoneChange={(none) => {
+            setError('')
+            onChange({ ...drafts, history_none: { ...drafts.history_none, [key]: none } })
+          }}
+          onChange={(value) => update('medical_history', { ...drafts.medical_history, [key]: value })} />)}
       </>}
       {error && <p className="field-error" role="alert">{error}</p>}
       <Button icon={question === 'medical_history' ? 'check' : 'arrow-right'} className="wide" type="submit">{question === 'medical_history' ? 'Сохранить ответы и посмотреть итог' : 'Продолжить'}</Button>

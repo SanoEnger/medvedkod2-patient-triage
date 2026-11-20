@@ -42,6 +42,9 @@ class PrimaryComplaint(StrictModel):
 
 
 class PatientContext(StrictModel):
+    sex: Literal["male", "female"] | None = None
+    height_cm: float | None = Field(default=None, ge=1, le=300)
+    weight_kg: float | None = Field(default=None, ge=0.1, le=1000)
     age_years: int | None = Field(default=None, ge=0, le=120)
     temperature_c: float | None = Field(default=None, ge=30, le=45)
     pregnancy: bool | None = None
@@ -115,6 +118,7 @@ class Progress(StrictModel):
 
 
 class SessionResponse(StrictModel):
+    answers: dict[str, dict[str, Any]] = Field(default_factory=dict)
     nlp: dict[str, ExtractionResult] = Field(default_factory=dict)
     id: UUID
     status: SurveyStatus

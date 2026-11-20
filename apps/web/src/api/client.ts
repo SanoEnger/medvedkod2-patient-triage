@@ -1,6 +1,9 @@
 import { getAppSession } from '../max/host'
 import { QUESTIONS } from './contracts'
 import type { Survey, SurveyClient, Triage } from './contracts'
+import type { ChatClient, Conversation } from './chat'
+
+export interface MedvedClient extends SurveyClient { chat: ChatClient }
 
 export class ApiError extends Error {
   constructor(public readonly status = 0, public readonly emergency = false, public readonly invalidResponse = false) {
@@ -46,6 +49,20 @@ export function parseSurvey(value: unknown): Survey {
   if (value.result !== null) parseTriage(value.result)
   return value as unknown as Survey
 }
+export function parseChat(value: unknown): Conversation {
+  const uuid = (entry: unknown) => typeof entry === 'string' && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(entry)
+  if (!object(value) || !uuid(value.id) || !(value.questionnaire_id === null || uuid(value.questionnaire_id))
+    || typeof value.emergency !== 'boolean' || typeof value.pending !== 'boolean' || typeof value.retryable !== 'boolean'
+    || !Array.isArray(value.messages) || value.messages.length > 201
+    || value.messages.some((entry) => !object(entry) || !uuid(entry.id) || !['user', 'assistant'].includes(String(entry.role))
+      || typeof entry.text !== 'string' || !entry.text || entry.text.length > 6000
+      || typeof entry.created_at !== 'string' || !Number.isFinite(Date.parse(entry.created_at))
+      || typeof entry.emergency !== 'boolean' || !(entry.client_message_id == null || uuid(entry.client_message_id)))) {
+    throw new ApiError(0, emergencyHint(value), true)
+  }
+  if (value.result !== null) parseTriage(value.result)
+  return value as unknown as Conversation
+}
 export function apiEndpoint(path: string): URL {
   let origin: URL
   try { origin = new URL(import.meta.env.VITE_API_ORIGIN || window.location.origin) }
@@ -57,7 +74,7 @@ export function apiEndpoint(path: string): URL {
   return new URL(path, origin.origin)
 }
 
-export function createApiClient(mode: 'demo' | 'max'): SurveyClient {
+export function createApiClient(mode: 'demo' | 'max'): MedvedClient {
   let demoSession: { accessToken: string; expiresAt: number } | undefined
   let authorization: Promise<string> | undefined
   async function request(path: string, method: string, body?: unknown, signal?: AbortSignal, token?: string): Promise<unknown> {
@@ -67,7 +84,7 @@ export function createApiClient(mode: 'demo' | 'max'): SurveyClient {
         method, headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: 'Bearer ' + token } : {}) },
         body: body === undefined ? undefined : JSON.stringify(body),
         credentials: 'omit', cache: 'no-store', redirect: 'error', referrerPolicy: 'no-referrer',
-        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(path.startsWith('/api/v1/chats') ? 30000 : 15000)]) : AbortSignal.timeout(path.startsWith('/api/v1/chats') ? 30000 : 15000),
       })
     } catch (error) { if (error instanceof ApiError) throw error; throw new ApiError() }
     if (method === 'DELETE' && response.status === 204) return undefined
@@ -99,6 +116,18 @@ export function createApiClient(mode: 'demo' | 'max'): SurveyClient {
   }
   const path = (id: string) => '/api/v1/sessions/' + encodeURIComponent(id)
   return {
+    chat: {
+      availability: async (signal) => {
+        const value = await call('/api/v1/chats/availability', 'GET', undefined, signal)
+        if (!object(value) || !('active_survey' in value)) throw new ApiError(0, false, true)
+        return { active_survey: value.active_survey === null ? null : parseSurvey(value.active_survey) }
+      },
+      open: async (questionnaireId, signal) => parseChat(await call('/api/v1/chats', 'POST',
+        { accepted_disclaimer: true, ...(questionnaireId ? { questionnaire_id: questionnaireId } : {}) }, signal)),
+      get: async (id, signal) => parseChat(await call('/api/v1/chats/' + encodeURIComponent(id), 'GET', undefined, signal)),
+      send: async (id, message, signal) => parseChat(await call('/api/v1/chats/' + encodeURIComponent(id) + '/messages', 'POST', message, signal)),
+      delete: async (id, signal) => { await call('/api/v1/chats/' + encodeURIComponent(id), 'DELETE', undefined, signal) },
+    },
     create: async (signal) => parseSurvey(await call('/api/v1/sessions', 'POST', { accepted_disclaimer: true }, signal)),
     get: async (id, signal) => parseSurvey(await call(path(id), 'GET', undefined, signal)),
     answer: async (id, body, signal) => parseSurvey(await call(path(id) + '/answers', 'POST', body, signal)),

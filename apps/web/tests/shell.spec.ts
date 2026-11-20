@@ -1,4 +1,9 @@
 import { expect, test } from '@playwright/test'
+import { apiFixture } from './fixtures/survey'
+
+test.beforeEach(async ({ page }, info) => {
+  await apiFixture(page, { scenario: info.title.startsWith('emergency') ? 'emergency' : 'planned' })
+})
 
 test('loading, temporary failure and retry', async ({ page }) => {
   await page.goto('/?demo=error-once')
@@ -6,7 +11,7 @@ test('loading, temporary failure and retry', async ({ page }) => {
   await expect(page.getByRole('alert')).toContainText('Не удалось открыть приложение')
   await page.getByRole('button', { name: 'Попробовать снова' }).click()
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Привет, я МедВед')
-  await expect(page.getByText('Демоверсия', { exact: true })).toBeVisible()
+  await expect(page.getByText('Демоверсия', { exact: true })).toHaveCount(0)
 })
 
 for (const [width, height] of [[360, 640], [390, 844], [768, 1024], [1440, 900]]) {
@@ -38,7 +43,7 @@ test('keyboard navigation, consent and visible focus', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'Перейти к содержимому' })).toBeFocused()
   await page.keyboard.press('Tab')
   await page.keyboard.press('Tab')
-  await expect(page.getByRole('button', { name: 'Читаемость', exact: true })).toBeFocused()
+  await expect(page.getByRole('button', { name: 'Версия для слабовидящих', exact: true })).toBeFocused()
   await page.keyboard.press('Tab')
   const start = page.getByRole('button', { name: 'Начать опрос', exact: true })
   await expect(start).toBeFocused()

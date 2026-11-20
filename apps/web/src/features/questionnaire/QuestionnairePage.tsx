@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Button, Card } from '../../components/ui'
 import { Icon } from '../../components/Icon'
 import { QUESTIONS } from '../../api/contracts'
-import type { SurveyClient, Triage } from '../../api/contracts'
-import { titles, emptyDrafts } from './fields'
+import type { Survey, SurveyClient, Triage } from '../../api/contracts'
+import { titles, draftsFromAnswers } from './fields'
 import { QuestionForm } from './QuestionForm'
 import { useQuestionnaire } from './useQuestionnaire'
 
@@ -13,15 +13,14 @@ const urgencyLabels: Record<Triage['urgency'], string> = {
 function ResultCard({ result }: { result: Triage }) {
   return <Card className="result-card">
     <p className="urgency-label">{urgencyLabels[result.urgency]}</p>
-    <h2>{result.urgency === 'UNKNOWN' ? 'Недостаточно сведений для маршрута' : 'Куда обратиться'}</h2>
+    <h2>Куда обратиться</h2>
     <dl className="result-details">
-      <div><dt>Специалист</dt><dd>{result.specialty || 'Не определён'}</dd></div>
+      <div><dt>Специалист</dt><dd>{result.specialty || 'Терапевт'}</dd></div>
       <div><dt>Место обращения</dt><dd>{result.place || 'Нужно уточнить'}</dd></div>
       <div><dt>Обоснование</dt><dd>{result.rationale}</dd></div>
     </dl>
-    {result.needs_clarification && <p className="notice">Уточните ответы. Неполных сведений недостаточно для рекомендации о самопомощи.</p>}
-    <p className="result-disclaimer">{result.disclaimer}</p>
-    <p className="result-disclaimer">При ухудшении вызывайте скорую: 103/112.</p>
+    {result.needs_clarification && result.urgency !== 'UNKNOWN' && <p className="notice">Ответы требуют уточнения.</p>}
+    <p className="result-disclaimer">{result.disclaimer.replace('Демонстрационный прототип', 'МедВед')}</p>
   </Card>
 }
 function errorText(status: number, invalid: boolean, hasSession: boolean): string {
@@ -35,10 +34,13 @@ function errorText(status: number, invalid: boolean, hasSession: boolean): strin
   return 'Не удалось подтвердить действие. Проверьте подключение и повторите попытку.'
 }
 
-export function QuestionnairePage({ client, onHome, mock = false }: { client: SurveyClient; onHome: () => void; mock?: boolean }) {
-  const flow = useQuestionnaire(client)
-  const [drafts, setDrafts] = useState(emptyDrafts)
-  const [accepted, setAccepted] = useState(false)
+export function QuestionnairePage({ client, onHome, onChat, initialSurvey, active = true, onSessionChange }: {
+  client: SurveyClient; onHome: () => void; onChat?: (id: string) => void; initialSurvey?: Survey | null
+  active?: boolean; onSessionChange?: (survey: Survey | null) => void
+}) {
+  const flow = useQuestionnaire(client, initialSurvey)
+  const [drafts, setDrafts] = useState(() => draftsFromAnswers(initialSurvey?.answers))
+  const [accepted, setAccepted] = useState(!!initialSurvey)
   const [editing, setEditing] = useState(false)
   const [finished, setFinished] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -48,16 +50,16 @@ export function QuestionnairePage({ client, onHome, mock = false }: { client: Su
   const unavailable = flow.survey && flow.error && [401, 403, 404].includes(flow.error.status)
   const screen = flow.emergency ? 'emergency' : unavailable ? 'unavailable' : question || (flow.survey ? 'result' : 'consent')
   useEffect(() => {
-    heading.current?.focus()
-    window.scrollTo(0, 0)
-  }, [screen])
+    if (active) { heading.current?.focus(); window.scrollTo(0, 0) }
+  }, [screen, active])
+  useEffect(() => { onSessionChange?.(flow.survey) }, [flow.survey, onSessionChange])
   useEffect(() => {
     if (confirmDelete) dialog.current?.showModal()
     else dialog.current?.close()
   }, [confirmDelete])
   function reset() {
     flow.reset()
-    setDrafts(emptyDrafts())
+    setDrafts(draftsFromAnswers())
     setAccepted(false)
     setEditing(false)
     setFinished(false)
@@ -71,7 +73,7 @@ export function QuestionnairePage({ client, onHome, mock = false }: { client: Su
   </div>
   const backPending = flow.activity === 'back' || (flow.error && flow.failedKind === 'back')
   return <div className="questionnaire-page">
-    {!flow.emergency && <Button icon="home" variant="secondary" className="home-action" onClick={onHome}>На главную</Button>}
+    {!flow.emergency && <Button icon="home" variant="secondary" className="home-action" disabled={flow.busy} onClick={onHome}>На главную</Button>}
     {flow.emergency ? <Card className="emergency-card">
       <p className="urgency-label">Экстренно · 103/112</p>
       <h1 ref={heading} tabIndex={-1}>Вызовите скорую помощь</h1>
@@ -88,8 +90,7 @@ export function QuestionnairePage({ client, onHome, mock = false }: { client: Su
         <p className="eyebrow">Перед началом</p>
         <h1 ref={heading} tabIndex={-1}>Несколько важных слов</h1>
         <p className="question-note">Бот не ставит диагноз и не заменяет врача. Он не назначает лекарства и лечение.</p>
-        <div className="notice"><p>Это демонстрационный прототип. Вводите только вымышленные сведения. Не указывайте имя, телефон, адрес и данные документов.</p></div>
-        {mock && <p className="question-note">Учебный пример с заранее заданным результатом. Ответы остаются только в памяти этой страницы.</p>}
+        <div className="notice"><p>Не указывайте имя, телефон, адрес и данные документов.</p></div>
         <form onSubmit={(event) => { event.preventDefault(); if (accepted && !flow.busy) void flow.start() }}>
           <label className="consent-field"><input type="checkbox" required checked={accepted} disabled={flow.busy} onChange={(event) => setAccepted(event.target.checked)} /><span>Я понимаю, что бот не ставит диагноз и не заменяет врача</span></label>
           <Button icon="clipboard" type="submit" className="wide" disabled={!accepted || flow.busy}>Начать опрос</Button>
@@ -121,8 +122,14 @@ export function QuestionnairePage({ client, onHome, mock = false }: { client: Su
             {finished && <p className="form-feedback" role="status">Ответы сохранены. Можно вернуться на главную или начать новый опрос.</p>}
             <div className="form-actions">
               {!finished && flow.survey.status !== 'COMPLETED' && <Button icon="check" disabled={flow.busy} onClick={async () => { if (await flow.triage()) setFinished(true) }}>{flow.survey.result ? 'Завершить опрос' : 'Получить результат'}</Button>}
+              {onChat && flow.survey.result && <Button icon="chat" disabled={flow.busy} onClick={async () => {
+                const id = flow.survey!.id
+                if (flow.survey!.status === 'COMPLETED' || await flow.triage()) onChat(id)
+              }}>Уточнить у МедВеда</Button>}
               <Button icon="edit" variant="secondary" disabled={flow.busy} onClick={() => setEditing((value) => !value)}>Уточнить ответы</Button>
-              <Button icon="restart" variant="secondary" disabled={flow.busy} onClick={reset}>Начать новый опрос</Button>
+              <Button icon="restart" variant="secondary" disabled={flow.busy} onClick={async () => {
+                if (flow.survey!.status !== 'REVIEWING' || await flow.triage()) reset()
+              }}>Начать новый опрос</Button>
             </div>
             {editing && <Card><h2>К какому шагу вернуться?</h2><p className="question-note">После возврата следующие ответы нужно подтвердить заново. Прежний результат будет сброшен.</p>
               <div className="edit-steps">{QUESTIONS.slice(0, flow.survey.progress.answered).map((key, index) =>
@@ -143,7 +150,7 @@ export function QuestionnairePage({ client, onHome, mock = false }: { client: Su
       <div className="form-actions">
         <Button variant="secondary" autoFocus disabled={flow.busy} onClick={() => setConfirmDelete(false)}>Отмена</Button>
         <Button disabled={flow.busy} onClick={async () => {
-          if (await flow.remove()) { setConfirmDelete(false); setDrafts(emptyDrafts()); setAccepted(false); setFinished(false); setEditing(false) }
+          if (await flow.remove()) { setConfirmDelete(false); setDrafts(draftsFromAnswers()); setAccepted(false); setFinished(false); setEditing(false) }
         }}>{flow.activity === 'delete' ? 'Удаляем…' : 'Удалить'}</Button>
       </div>
     </dialog>

@@ -38,13 +38,16 @@ services:
 
   api:
     <<: *api-image
+    env_file:
+      - path: ./apps/api/.env
+        required: false
+      - path: ./.env
+        required: false
     environment:
       DEMO_MODE: ${DEMO_MODE:-true}
       NLP_MODE: ${NLP_MODE:-mock}
       CORE_URL: ${CORE_URL:-https://tm-test-yakut.hostco.ru}
       CORE_SERVICE_TOKEN: ${CORE_SERVICE_TOKEN:-}
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
-      GROQ_MODEL: ${GROQ_MODEL:-}
       FRAME_ANCESTORS: ${FRAME_ANCESTORS:-'self'}
     volumes:
       - api-secrets:/run/medved:ro

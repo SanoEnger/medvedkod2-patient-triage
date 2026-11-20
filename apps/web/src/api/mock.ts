@@ -73,7 +73,7 @@ export function createMockClient(scenario: DemoScenario = 'planned'): SurveyClie
     async triage(id) {
       const survey = find(id).survey
       survey.result ??= demoResult(survey.progress.answered === QUESTIONS.length ? scenario : 'unknown')
-      if (survey.result.urgency === 'PLANNED') survey.status = survey.state = 'COMPLETED'
+      if (survey.progress.answered === QUESTIONS.length && survey.status === 'REVIEWING') survey.status = survey.state = 'COMPLETED'
       return clone(survey.result)
     },
     async delete(id) { find(id); sessions.delete(id) },

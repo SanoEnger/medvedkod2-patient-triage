@@ -10,7 +10,7 @@ import { useQuestionnaire } from './useQuestionnaire'
 
 function mount(client: SurveyClient = createMockClient()) {
   const home = vi.fn()
-  render(<AppShell mode="demo"><QuestionnairePage client={client} mock onHome={home} /></AppShell>)
+  render(<AppShell mode="demo"><QuestionnairePage client={client} onHome={home} /></AppShell>)
   return { user: userEvent.setup(), home }
 }
 async function consent(user: ReturnType<typeof userEvent.setup>) {
@@ -109,7 +109,7 @@ describe('questionnaire UI', () => {
     expect(screen.getByRole('link', { name: 'Позвонить 112' })).toHaveAttribute('href', 'tel:112')
     expect(screen.queryByRole('button', { name: 'Назад' })).not.toBeInTheDocument()
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Читаемость' }))
+    await user.click(screen.getByRole('button', { name: 'Версия для слабовидящих' }))
     expect(screen.getByRole('heading', { name: 'Вызовите скорую помощь' })).toBeVisible()
   })
 
@@ -117,7 +117,10 @@ describe('questionnaire UI', () => {
     const { user } = mount(createMockClient('unknown'))
     await complete(user)
     expect(screen.getByText('Нужно уточнение', { exact: true })).toBeVisible()
-    expect(screen.getByText('Недостаточно сведений для маршрута')).toBeVisible()
+    const card = screen.getByRole('heading', { name: 'Куда обратиться' }).closest('section')!
+    expect(within(card).getByText('Терапевт', { exact: true })).toBeVisible()
+    expect(card.textContent?.match(/103\/112/g)).toHaveLength(1)
+    expect(within(card).queryByText(/Уточните ответы/)).not.toBeInTheDocument()
     expect(screen.queryByText('Самопомощь', { exact: true })).not.toBeInTheDocument()
   })
 
@@ -168,7 +171,7 @@ describe('questionnaire UI', () => {
     await consent(user)
     await user.type(screen.getByLabelText('Что беспокоит — своими словами'), 'Synthetic retained draft')
     await user.click(screen.getByRole('radio', { name: 'Кожа' }))
-    await user.click(screen.getByRole('button', { name: 'Читаемость' }))
+    await user.click(screen.getByRole('button', { name: 'Версия для слабовидящих' }))
     expect(screen.getByLabelText('Что беспокоит — своими словами')).toHaveValue('Synthetic retained draft')
     expect(screen.getByRole('radio', { name: 'Кожа' })).toBeChecked()
     expect(send).not.toHaveBeenCalled()

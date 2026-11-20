@@ -1,6 +1,7 @@
 export const QUESTIONS = ['primary_complaint', 'patient_context', 'symptom_details', 'red_flags', 'medical_history'] as const
 export type QuestionKey = typeof QUESTIONS[number]
 export type Category = 'pain' | 'fever' | 'breathing' | 'digestive' | 'skin' | 'neurology' | 'injury' | 'other'
+export type Sex = 'male' | 'female'
 export type Status = 'COLLECTING' | 'REVIEWING' | 'COMPLETED' | 'EMERGENCY_STOP' | 'EXPIRED'
 export type Urgency = 'EMERGENCY' | 'WITHIN_24H' | 'PLANNED' | 'SELF_CARE' | 'UNKNOWN'
 export const RED_FLAGS = ['chest_pain', 'dyspnea_rest', 'loss_of_consciousness', 'seizure', 'bleeding', 'facial_asymmetry', 'arm_weakness', 'speech_difficulty', 'anaphylaxis', 'acute_abdominal_pain', 'head_injury_with_loc'] as const
@@ -10,7 +11,7 @@ export type HistoryField = typeof HISTORY_FIELDS[number]
 
 export interface Answers {
   primary_complaint: { category: Category; text: string }
-  patient_context: { age_years: number | null; temperature_c: number | null; pregnancy: boolean | null; lactation: boolean | null }
+  patient_context: { age_years: number | null; temperature_c: number | null; sex?: Sex | null; height_cm?: number | null; weight_kg?: number | null; pregnancy: boolean | null; lactation: boolean | null }
   symptom_details: { location: string; duration: string; severity_0_10: number | null; additional_text: string }
   red_flags: Record<RedFlag, boolean | null>
   medical_history: Record<HistoryField, string[]>
@@ -27,6 +28,7 @@ export interface Triage {
 }
 export interface Survey {
   id: string
+  answers?: Partial<Answers>
   status: Status
   state: Status
   progress: { answered: number; total: number; percent: number }

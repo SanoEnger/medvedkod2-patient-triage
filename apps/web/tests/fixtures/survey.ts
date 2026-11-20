@@ -2,7 +2,7 @@ import { expect } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { ApiError } from '../../src/api/client'
 import { createMockClient } from '../../src/api/mock'
-import type { AnswerRequest } from '../../src/api/contracts'
+import type { AnswerRequest, Survey } from '../../src/api/contracts'
 import type { DemoScenario } from '../../src/api/mock'
 
 export async function apiFixture(page: Page, options: {
@@ -11,37 +11,46 @@ export async function apiFixture(page: Page, options: {
   const client = createMockClient(options.scenario)
   const answers: AnswerRequest[] = []
   const deletions: string[] = []
+  let current: Survey | null = null
   let lost = false, failedDelete = false, conflicted = false, expired = false
   await page.route('**/api/v1/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname
     if (path.endsWith('/auth/launch')) {
-      expect(request.postDataJSON()).toEqual({ mode: 'host', host_token: 'synthetic-jwt' })
+      const body = request.postDataJSON()
+      expect(body).toEqual(body.mode === 'demo' ? { mode: 'demo' } : { mode: 'host', host_token: 'synthetic-jwt' })
       await route.fulfill({ json: { access_token: 'synthetic-api-session', token_type: 'bearer', expires_in: 3600 } })
       return
     }
     expect(request.headers().authorization).toBe('Bearer synthetic-api-session')
+    if (path === '/api/v1/chats/availability') {
+      await route.fulfill({ json: { active_survey: current && ['COLLECTING', 'REVIEWING'].includes(current.status) ? current : null } })
+      return
+    }
     const id = path.split('/')[4]
     try {
       if (request.method() === 'POST' && path === '/api/v1/sessions') {
         expect(request.postDataJSON()).toEqual({ accepted_disclaimer: true })
-        await route.fulfill({ status: 201, json: await client.create() })
+        await route.fulfill({ status: 201, json: current = await client.create() })
       } else if (path.endsWith('/answers')) {
         const body = request.postDataJSON() as AnswerRequest
         answers.push(body)
         if (options.expiredAnswer && !expired) { expired = true; throw new ApiError(404) }
         if (options.conflict && !conflicted) { conflicted = true; throw new ApiError(409) }
-        const response = await client.answer(id, body)
+        const response = current = await client.answer(id, body)
         if (options.lostAnswer && !lost) { lost = true; await route.abort(); return }
         await route.fulfill({ json: options.malformedEmergency ? { emergency: true } : response })
       } else if (path.endsWith('/back')) {
-        await route.fulfill({ json: await client.back(id, request.postDataJSON().target_step) })
+        await route.fulfill({ json: current = await client.back(id, request.postDataJSON().target_step) })
       } else if (path.endsWith('/triage')) {
-        await route.fulfill({ json: await client.triage(id) })
+        const result = await client.triage(id)
+        current = await client.get(id)
+        await route.fulfill({ json: result })
       } else if (request.method() === 'DELETE') {
         deletions.push(id)
         if (options.deleteFailure && !failedDelete) { failedDelete = true; throw new ApiError(503) }
         await client.delete(id)
+        current = null
         await route.fulfill({ status: 204, body: '' })
       } else {
         await route.fulfill({ json: await client.get(id) })
@@ -72,7 +81,7 @@ export async function complete(page: Page) {
   await page.getByRole('button', { name: 'Продолжить' }).click()
   await page.getByRole('button', { name: 'Ничего из перечисленного' }).click()
   await page.getByRole('button', { name: 'Продолжить' }).click()
-  await page.getByLabel('Госпитализации за последний год').fill('Synthetic admission')
+  await page.getByLabel('Госпитализации за последний год', { exact: true }).fill('Synthetic admission')
   await page.getByRole('button', { name: 'Сохранить ответы и посмотреть итог' }).click()
   await expect(page.getByRole('heading', { name: 'Результат опроса' })).toBeVisible()
 }

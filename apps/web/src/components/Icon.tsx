@@ -1,6 +1,6 @@
 import iconsUrl from '../assets/medved-icons.svg?url'
 
-export type IconName = 'arrow-left' | 'arrow-right' | 'home' | 'close' | 'chevron-down'
+export type IconName = 'chat' | 'arrow-left' | 'arrow-right' | 'home' | 'close' | 'chevron-down'
   | 'check' | 'restart' | 'text-size' | 'clipboard' | 'edit' | 'map-pin' | 'info'
   | 'shield' | 'warning' | 'phone' | 'pain' | 'temperature' | 'breathing' | 'stomach'
   | 'skin' | 'injury' | 'more'

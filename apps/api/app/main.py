@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from app.api.chat_routes import router as chat_router
 from app.api.routes import router
 from app.core.config import Settings
 from app.core.encryption import JsonCipher
@@ -20,9 +21,16 @@ from app.db.models import Base
 from app.db.repository import delete_expired_sessions
 from app.db.safety_catalog import verify_runtime_catalog
 from app.db.survey_store import PostgresSurveyStore
+from app.integrations.chat_agent import ChatAgent
+from app.integrations.groq import (
+    GroqClient,
+    GroqSettings,
+    MockGroqClient,
+    SymptomExtractor,
+)
 from app.integrations.max_core import MaxCoreClient
+from app.services.chat import ChatService
 from app.services.sessions import SessionService
-from app.integrations.groq import GroqClient, GroqSettings, MockGroqClient, SymptomExtractor
 
 
 async def expire_sessions(factory, cipher: JsonCipher) -> None:
@@ -38,6 +46,7 @@ async def expire_sessions(factory, cipher: JsonCipher) -> None:
 def create_app(
     settings: Settings | None = None, max_core: MaxCoreClient | None = None,
     *, session_service: SessionService | None = None, extractor: SymptomExtractor | None = None,
+    chat_service: ChatService | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     settings.validate()
@@ -49,6 +58,8 @@ def create_app(
         factory = async_sessionmaker(engine, expire_on_commit=False)
         session_service = SessionService(settings.survey_ttl_seconds,
                                         PostgresSurveyStore(factory, cipher, settings.demo_mode), extractor=extractor)
+        chat_service = chat_service or ChatService(factory, cipher, ChatAgent(GroqClient(GroqSettings.from_env())),
+            ttl_seconds=settings.survey_ttl_seconds, demo_mode=settings.demo_mode)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -74,6 +85,7 @@ def create_app(
                   version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.sessions = session_service
+    app.state.chat = chat_service
     app.state.max_core = max_core or MaxCoreClient(settings)
     app.state.launch_limiter = LocalRateLimiter()
     if settings.cors_origins:
@@ -107,4 +119,5 @@ def create_app(
         return JSONResponse(status_code=422, content={"detail": "invalid_request_schema"})
 
     app.include_router(router)
+    app.include_router(chat_router)
     return app
