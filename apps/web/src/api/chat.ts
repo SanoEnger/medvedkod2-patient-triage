@@ -17,9 +17,15 @@ export interface Conversation {
   pending: boolean
   retryable: boolean
 }
+export type ChatKind = 'chat' | 'questionnaire' | 'questionnaire_result'
+export interface ChatHistoryQuery {
+  kind?: ChatKind
+  cursor?: string
+}
+
 export interface ChatSummary {
   id: string
-  kind: 'chat' | 'questionnaire' | 'questionnaire_result'
+  kind: ChatKind
   title: string
   created_at: string
   last_activity_at: string
@@ -33,7 +39,7 @@ export interface ChatHistory {
 }
 
 export interface ChatClient {
-  list(cursor?: string, signal?: AbortSignal): Promise<ChatHistory>
+  list(query?: ChatHistoryQuery, signal?: AbortSignal): Promise<ChatHistory>
   availability(signal?: AbortSignal): Promise<{ active_survey: Survey | null }>
   open(questionnaireId?: string, signal?: AbortSignal): Promise<Conversation>
   get(id: string, signal?: AbortSignal): Promise<Conversation>

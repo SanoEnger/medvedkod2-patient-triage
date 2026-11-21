@@ -6,10 +6,15 @@ import type { ChatClient, ChatHistory, Conversation } from './chat'
 export interface MedvedClient extends SurveyClient { chat: ChatClient }
 
 export class ApiError extends Error {
-  constructor(public readonly status = 0, public readonly emergency = false, public readonly invalidResponse = false) {
+  constructor(public readonly status = 0, public readonly emergency = false, public readonly invalidResponse = false,
+    public readonly code?: string) {
     super('SURVEY_API_ERROR')
   }
 }
+const chatErrorCodes = new Set([
+  'questionnaire_in_progress', 'questionnaire_not_completed', 'chat_reply_pending', 'chat_turn_pending',
+  'chat_emergency_stop', 'chat_message_limit', 'idempotency_conflict', 'questionnaire_changed',
+])
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every((entry) => typeof entry === 'string')
 const nullableText = (value: unknown) => value === null || typeof value === 'string'
@@ -104,7 +109,8 @@ export function createApiClient(mode: 'demo' | 'max', onAuthorizationExpired?: (
     let value: unknown
     try { value = await response.json() } catch { throw new ApiError(response.status, false, true) }
     if (!response.ok) {
-      throw new ApiError(response.status, emergencyHint(value))
+      const code = object(value) && typeof value.detail === 'string' && chatErrorCodes.has(value.detail) ? value.detail : undefined
+      throw new ApiError(response.status, emergencyHint(value), false, code)
     }
     return value
   }
@@ -132,8 +138,12 @@ export function createApiClient(mode: 'demo' | 'max', onAuthorizationExpired?: (
   const path = (id: string) => '/api/v1/sessions/' + encodeURIComponent(id)
   return {
     chat: {
-      list: async (cursor, signal) => parseChatHistory(await call(
-        '/api/v1/chats' + (cursor ? '?' + new URLSearchParams({ cursor }) : ''), 'GET', undefined, signal)),
+      list: async ({ cursor, kind } = {}, signal) => {
+        const params = new URLSearchParams()
+        if (cursor) params.set('cursor', cursor)
+        if (kind) params.set('kind', kind)
+        return parseChatHistory(await call('/api/v1/chats' + (params.size ? '?' + params : ''), 'GET', undefined, signal))
+      },
       availability: async (signal) => {
         const value = await call('/api/v1/chats/availability', 'GET', undefined, signal)
         if (!object(value) || !('active_survey' in value)) throw new ApiError(0, false, true)

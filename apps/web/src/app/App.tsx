@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { HostContext, MaxHostAdapter } from '../max/MaxHostAdapter'
 import type { Survey } from '../api/contracts'
-import type { ChatSummary } from '../api/chat'
+import type { ChatKind, ChatSummary } from '../api/chat'
 import { ErrorState, LoadingState } from '../components/ScreenState'
 import { Button } from '../components/ui'
 import { WelcomePage } from '../pages/WelcomePage'
@@ -57,6 +57,7 @@ function Workspace({ client }: { client: MedvedClient }) {
   const [availabilityError, setAvailabilityError] = useState(false)
   const [refresh, setRefresh] = useState(0)
   const [resultId, setResultId] = useState<string>()
+  const [historyFilter, setHistoryFilter] = useState<ChatKind>()
   const [chatTarget, setChatTarget] = useState<{ questionnaireId?: string; saved?: ChatSummary; key: string } | null>(null)
   const focusAfterNavigation = useRef(false)
   const activeSurvey = inProgress(survey) ? survey
@@ -120,7 +121,8 @@ function Workspace({ client }: { client: MedvedClient }) {
       surveyInProgress={!!activeSurvey} chatBlocked={chatBlocked} />
       {availabilityError && <div className="survey-error" role="alert"><p>Не удалось проверить текущий опрос. Чат временно недоступен.</p><Button icon="restart" variant="secondary" onClick={() => { setChecking(true); setRefresh((value) => value + 1) }}>Повторить проверку</Button></div>}
     </>}
-    {page === 'history' && <ChatHistoryPage client={client} onHome={() => navigate('welcome')} onOpen={openSaved} onDeleted={chatDeleted} />}
+    {page === 'history' && <ChatHistoryPage client={client} filter={historyFilter} onFilterChange={setHistoryFilter}
+      onHome={() => navigate('welcome')} onOpen={openSaved} onDeleted={chatDeleted} />}
     {page === 'result' && resultId && <SavedSurveyResultPage key={resultId} id={resultId} client={client} chatBlocked={chatBlocked}
       onHistory={() => navigate('history')} onChat={() => openChat(resultId)} />}
     {surveyOpened && <div hidden={page !== 'survey'}>

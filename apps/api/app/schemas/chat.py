@@ -6,6 +6,8 @@ from pydantic import Field, field_validator
 
 from app.schemas.survey import SessionResponse, StrictModel, TriageResponse
 
+ChatKind = Literal["chat", "questionnaire", "questionnaire_result"]
+
 
 class ChatCreate(StrictModel):
     accepted_disclaimer: Literal[True]
@@ -49,7 +51,7 @@ class ChatAvailability(StrictModel):
 
 class ChatSummary(StrictModel):
     id: UUID
-    kind: Literal["chat", "questionnaire", "questionnaire_result"]
+    kind: ChatKind
     title: str
     created_at: datetime
     last_activity_at: datetime

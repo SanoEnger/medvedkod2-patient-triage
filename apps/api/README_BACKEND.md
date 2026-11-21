@@ -110,7 +110,7 @@ patient_context поддерживает lactation: boolean | null. medical_hist
 | Метод | Путь | Назначение |
 | --- | --- | --- |
 | GET | `/api/v1/chats/availability` | Активный опрос владельца либо `null`; ответы позволяют продолжить опрос после перезагрузки |
-| GET | `/api/v1/chats` | История владельца. `limit` от 1 до 100 (по умолчанию 20), `cursor` из `next_cursor` предыдущей страницы |
+| GET | `/api/v1/chats` | История владельца. `limit` от 1 до 100 (по умолчанию 20), `cursor` из `next_cursor`, необязательный фильтр `kind` |
 | POST | `/api/v1/chats` | `{accepted_disclaimer:true, questionnaire_id?:UUID}` — отдельный чат либо уточнение завершённого опроса |
 | GET | `/api/v1/chats/{id}` | Сообщения, результат, `pending`, `retryable` |
 | POST | `/api/v1/chats/{id}/messages` | `{text, client_message_id:UUID}`; до 2000 символов, повтор ID не создаёт дублей |

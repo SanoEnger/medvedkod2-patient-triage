@@ -276,6 +276,16 @@ async def test_history_paginates_by_activity_and_restores_after_app_restart(chat
         tied = sorted([(second, "chat"), (survey, "questionnaire")], reverse=True)
         assert seen == [(first, "chat"), *tied]
         assert cursor is None
+        filtered = (await restarted.get("/api/v1/chats", params={"kind": "chat", "limit": 1})).json()
+        assert [item["id"] for item in filtered["items"]] == [first]
+        page = (await restarted.get("/api/v1/chats", params={
+            "kind": "chat", "limit": 1, "cursor": filtered["next_cursor"],
+        })).json()
+        assert [item["id"] for item in page["items"]] == [second]
+        assert page["next_cursor"] is None
+        followups = (await restarted.get("/api/v1/chats", params={"kind": "questionnaire"})).json()
+        assert [item["id"] for item in followups["items"]] == [survey]
+        assert (await restarted.get("/api/v1/chats", params={"kind": "unknown"})).status_code == 422
         assert (await restarted.get(f"/api/v1/chats/{empty}")).status_code == 200
         restored = await restarted.get(f"/api/v1/chats/{first}")
         assert restored.json() == sent.json()
@@ -298,7 +308,7 @@ async def test_completed_result_without_chat_is_restored_from_history(chat_api):
         assert completed.status_code == 200
 
     async with connect() as restarted, connect(OTHER) as other:
-        history = (await restarted.get("/api/v1/chats")).json()
+        history = (await restarted.get("/api/v1/chats", params={"kind": "questionnaire_result"})).json()
         assert [(row["id"], row["kind"], row["title"]) for row in history["items"]] == [
             (identifier, "questionnaire_result", "Боль в колене"),
         ]

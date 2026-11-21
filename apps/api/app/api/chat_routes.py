@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -9,6 +10,7 @@ from app.schemas.chat import (
     ChatCreate,
     ChatError,
     ChatHistory,
+    ChatKind,
     ChatResponse,
     ChatSend,
 )
@@ -39,6 +41,7 @@ async def list_chats(
     owner: str = Depends(get_principal),
     limit: int = Query(20, ge=1, le=100),
     cursor: str | None = Query(None, max_length=80, description="next_cursor from the previous page"),
+    kind: Annotated[ChatKind | None, Query(description="Filter by history entry type before pagination")] = None,
 ):
     boundary = None
     if cursor is not None:
@@ -50,7 +53,7 @@ async def list_chats(
             boundary = (activity, UUID(identifier))
         except (ValueError, OverflowError):
             raise HTTPException(status_code=422, detail="invalid_chat_cursor") from None
-    return await service(request).history(owner, limit, boundary)
+    return await service(request).history(owner, limit, boundary, kind)
 
 
 @router.post("", response_model=ChatResponse, status_code=201)

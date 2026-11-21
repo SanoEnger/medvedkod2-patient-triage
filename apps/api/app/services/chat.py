@@ -122,7 +122,7 @@ class ChatService:
             )
         return titles
 
-    async def history(self, owner, limit, boundary):
+    async def history(self, owner, limit, boundary, kind=None):
         has_user_message = select(MessageRecord.id).where(
             MessageRecord.session_id == SessionRecord.id,
             MessageRecord.kind == "text",
@@ -158,6 +158,10 @@ class ChatService:
         )
         if boundary is not None:
             query = query.where(tuple_(activity, SessionRecord.id) < boundary)
+        if kind == "questionnaire_result":
+            query = query.where(~has_user_message, TriageResultRecord.session_id.is_not(None))
+        elif kind is not None:
+            query = query.where(SessionRecord.kind == kind, has_user_message)
         async with self.transaction() as db:
             rows = (await db.execute(query)).all()
             page = rows[:limit]

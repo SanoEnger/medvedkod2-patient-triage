@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ApiError } from '../../api/client'
 import type { MedvedClient } from '../../api/client'
-import type { ChatSummary } from '../../api/chat'
+import type { ChatHistoryQuery, ChatKind, ChatSummary } from '../../api/chat'
 import { Button, Card } from '../../components/ui'
 import { DeleteChatDialog } from './DeleteChatDialog'
 
@@ -11,14 +11,21 @@ const historyKinds: Record<ChatSummary['kind'], string> = {
   questionnaire: 'Уточнение по опросу',
   questionnaire_result: 'Результат опроса',
 }
+const filters: { kind?: ChatKind; label: string }[] = [
+  { label: 'Все' },
+  { kind: 'questionnaire_result', label: 'Результаты опросов' },
+  { kind: 'questionnaire', label: 'Уточнения' },
+  { kind: 'chat', label: 'Чаты' },
+]
 
-export function ChatHistoryPage({ client, onHome, onOpen, onDeleted }: {
+export function ChatHistoryPage({ client, filter, onFilterChange, onHome, onOpen, onDeleted }: {
   client: MedvedClient; onHome: () => void; onOpen: (chat: ChatSummary) => void; onDeleted: (id: string) => void
+  filter?: ChatKind; onFilterChange: (kind?: ChatKind) => void
 }) {
   const [items, setItems] = useState<ChatSummary[]>([])
   const [next, setNext] = useState<string | null>(null)
-  const [request, setRequest] = useState<{ cursor?: string } | null>({})
-  const [retry, setRetry] = useState<{ cursor?: string } | null>(null)
+  const [request, setRequest] = useState<ChatHistoryQuery | null>({ kind: filter })
+  const [retry, setRetry] = useState<ChatHistoryQuery | null>(null)
   const [error, setError] = useState('')
   const [selection, setSelection] = useState<ChatSummary | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -28,7 +35,7 @@ export function ChatHistoryPage({ client, onHome, onOpen, onDeleted }: {
   useEffect(() => {
     if (!request) return
     const controller = new AbortController()
-    client.chat.list(request.cursor, controller.signal).then(({ items: page, next_cursor }) => {
+    client.chat.list(request, controller.signal).then(({ items: page, next_cursor }) => {
       if (controller.signal.aborted) return
       setItems((previous) => request.cursor ? [...previous, ...page] : page)
       setNext(next_cursor)
@@ -37,7 +44,7 @@ export function ChatHistoryPage({ client, onHome, onOpen, onDeleted }: {
       setRetry(request)
       setError(cause instanceof ApiError && cause.status === 401
         ? 'Вход истёк. Снова откройте приложение в MAX.'
-        : 'Не удалось загрузить историю чатов.')
+        : 'Не удалось загрузить историю чатов. Повторите загрузку.')
     }).finally(() => { if (!controller.signal.aborted) setRequest(null) })
     return () => controller.abort()
   }, [client, request])
@@ -47,7 +54,7 @@ export function ChatHistoryPage({ client, onHome, onOpen, onDeleted }: {
     return () => deletion.current?.abort()
   }, [])
 
-  function load(page: { cursor?: string }) {
+  function load(page: ChatHistoryQuery) {
     setError('')
     setRetry(null)
     setRequest(page)
@@ -80,6 +87,16 @@ export function ChatHistoryPage({ client, onHome, onOpen, onDeleted }: {
   return <div className="chat-page">
     <Button icon="home" variant="secondary" onClick={onHome}>На главную</Button>
     <header className="chat-heading"><h1 ref={heading} tabIndex={-1}>История чатов</h1></header>
+    <div className="form-actions chat-history-filters" role="group" aria-label="Тип записи">
+      {filters.map(({ kind, label }) => <Button key={label} variant={kind === filter ? 'primary' : 'secondary'}
+        aria-pressed={kind === filter} onClick={() => {
+          if (kind === filter) return
+          onFilterChange(kind)
+          setItems([])
+          setNext(null)
+          load({ kind })
+        }}>{label}</Button>)}
+    </div>
     {items.length > 0 && <ul className="chat-history">{items.map((chat) => {
       const type = historyKinds[chat.kind]
       const createdAt = dateTime.format(new Date(chat.created_at))
@@ -101,10 +118,11 @@ export function ChatHistoryPage({ client, onHome, onOpen, onDeleted }: {
     })}</ul>}
     {request && <p className="survey-loading" role="status">Загружаем историю…</p>}
     {error && <div className="survey-error" role="alert"><p>{error}</p></div>}
-    {!request && !error && !items.length && !next && <Card><p>Сохранённых чатов и результатов пока нет.</p></Card>}
+    {!request && !error && !items.length && !next &&
+      <Card><p>{filter ? 'Записей этого типа пока нет.' : 'Сохранённых чатов и результатов пока нет.'}</p></Card>}
     {retry && <Button icon="restart" variant="secondary" onClick={() => load(retry)}>Повторить загрузку</Button>}
-    {!request && !retry && next && <Button variant="secondary" onClick={() => load({ cursor: next })}>Показать ещё</Button>}
-    {!request && error && !retry && <Button icon="restart" variant="secondary" onClick={() => load({})}>Обновить историю</Button>}
+    {!request && !retry && next && <Button variant="secondary" onClick={() => load({ kind: filter, cursor: next })}>Показать ещё</Button>}
+    {!request && error && !retry && <Button icon="restart" variant="secondary" onClick={() => load({ kind: filter })}>Обновить историю</Button>}
     <DeleteChatDialog open={!!selection} kind={selection?.kind ?? 'chat'} busy={deleting}
       onCancel={() => setSelection(null)} onDelete={() => { void remove() }} />
   </div>

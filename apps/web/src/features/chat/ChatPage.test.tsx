@@ -51,11 +51,34 @@ test('lost request preserves the text and reuses the same message ID on retry', 
   await screen.findByText('Здравствуйте! Что вы хотите уточнить?')
   await user.type(screen.getByLabelText('Ваше сообщение'), 'Уточню вопрос')
   await user.click(screen.getByRole('button', { name: 'Отправить' }))
-  await screen.findByRole('alert')
+  expect(await screen.findByText('Сообщение не найдено в переписке. Нажмите «Повторить отправку».')).toBeVisible()
   expect(screen.getByLabelText('Ваше сообщение')).toHaveValue('Уточню вопрос')
   await user.click(screen.getByRole('button', { name: 'Повторить отправку' }))
   await screen.findByText('Подготовьте вопросы для врача.')
   expect(send.mock.calls[0][1]).toEqual(send.mock.calls[1][1])
+})
+
+test.each([
+  [false, 'Сообщение сохранено. МедВед готовит ответ…'],
+  [true, 'Сообщение сохранено, но ответ не получен. Нажмите «Повторить отправку».'],
+])('a failed request verifies the saved message before explaining its status (retryable=%s)', async (retryable, status) => {
+  const { client, send } = fixture()
+  const chat = await client.open()
+  send.mockImplementationOnce(async (_id, body) => {
+    vi.mocked(client.get).mockResolvedValue({ ...chat, pending: true, retryable, messages: [...chat.messages, {
+      ...body, id: crypto.randomUUID(), role: 'user', created_at: new Date().toISOString(), emergency: false,
+    }] })
+    throw new ApiError(503)
+  })
+  const { user } = mount(client)
+  await screen.findByText('Здравствуйте! Что вы хотите уточнить?')
+  await user.type(screen.getByLabelText('Ваше сообщение'), 'Уточню вопрос')
+  await user.click(screen.getByRole('button', { name: 'Отправить' }))
+  expect(await screen.findByText(status)).toBeVisible()
+  const retry = screen.getByRole('button', { name: 'Повторить отправку' })
+  if (retryable) expect(retry).toBeEnabled()
+  else expect(retry).toBeDisabled()
+  expect(screen.queryByRole('alert')).toBeNull()
 })
 
 test('active survey disables chat composition and offers a return to the survey', async () => {

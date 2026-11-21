@@ -7,14 +7,23 @@ import medvedUrl from '../../assets/medved-bear-button.svg?url'
 import { DeleteChatDialog } from './DeleteChatDialog'
 
 type Message = { text: string; client_message_id: string }
-function errorText(error: unknown) {
+function errorText(error: unknown, fallback = 'Не удалось обновить переписку. Нажмите «Обновить чат».') {
   if (error instanceof ApiError) {
-    if (error.status === 409) return 'Сейчас чат недоступен. Завершите или удалите текущий опрос, затем вернитесь в чат.'
     if (error.status === 401 || error.status === 403) return 'Доступ истёк. Снова откройте приложение в MAX.'
     if (error.status === 404) return 'Чат удалён или срок его хранения истёк. Начните новый чат.'
-    if (error.status === 429) return 'Слишком много сообщений. Подождите немного и повторите.'
+    if (error.code === 'questionnaire_in_progress' || error.code === 'questionnaire_not_completed') {
+      return 'Завершите текущий опрос, чтобы продолжить переписку.'
+    }
+    if (error.code === 'chat_reply_pending' || error.code === 'chat_turn_pending') {
+      return 'Предыдущее сообщение ещё обрабатывается. Обновите чат и проверьте ответ.'
+    }
+    if (error.code === 'chat_emergency_stop') return 'Этот чат остановлен и доступен для чтения.'
+    if (error.code === 'chat_message_limit') return 'Этот чат достиг лимита сообщений. Начните новый чат.'
+    if (error.code === 'questionnaire_changed') return 'Ответы опроса изменились. Откройте актуальный результат опроса.'
+    if (error.code === 'idempotency_conflict') return 'Сообщение изменилось при повторе. Проверьте текст и отправьте снова.'
+    if (error.status === 429) return 'Слишком много запросов. Подождите немного и повторите отправку.'
   }
-  return 'Не удалось обновить переписку. Повторите попытку.'
+  return fallback
 }
 
 export function ChatPage({ client, questionnaireId, saved, active, blocked, onHome, onHistory, onSurvey, onNew, onDeleted }: {
@@ -36,18 +45,22 @@ export function ChatPage({ client, questionnaireId, saved, active, blocked, onHo
   const heading = useRef<HTMLHeadingElement>(null)
   const bottom = useRef<HTMLDivElement>(null)
   const savedId = saved?.id
+  const lastMessage = chat?.pending ? chat.messages.at(-1) : undefined
+  const previousMessage = lastMessage?.client_message_id && pending.current &&
+    lastMessage.client_message_id !== pending.current.client_message_id ? lastMessage : undefined
+  const waitingForReply = chat?.pending && !chat.retryable
 
   function accept(value: Conversation) {
     setChat(value)
-    if (!value.pending) {
-      if (pending.current && value.messages.some((message) => message.client_message_id === pending.current?.client_message_id)) { pending.current = null; setDraft('') }
+    const last = value.messages.at(-1)
+    if (pending.current && value.messages.some((message) => message.client_message_id === pending.current?.client_message_id
+      && message.text === pending.current?.text && (!value.pending || message !== last))) {
+      pending.current = null
+      setDraft('')
     }
-    else {
-      const last = value.messages.at(-1)
-      if (last?.role === 'user' && last.client_message_id) {
-        pending.current = { text: last.text, client_message_id: last.client_message_id }
-        setDraft(last.text)
-      }
+    if (value.pending && !pending.current && last?.role === 'user' && last.client_message_id) {
+      pending.current = { text: last.text, client_message_id: last.client_message_id }
+      setDraft(last.text)
     }
   }
   useEffect(() => {
@@ -58,7 +71,7 @@ export function ChatPage({ client, questionnaireId, saved, active, blocked, onHo
     load.then(
       (value) => { if (alive.current && !controller.signal.aborted) accept(value) },
       (cause) => { if (alive.current && !controller.signal.aborted) setError(
-        cause instanceof ApiError && [401, 403, 404].includes(cause.status) ? errorText(cause) : 'Не удалось открыть чат. Повторите попытку.',
+        errorText(cause, 'Не удалось открыть чат. Повторите открытие.'),
       ) },
     ).finally(() => { if (alive.current && !controller.signal.aborted) setBusy(false) })
     return () => { alive.current = false; controller.abort() }
@@ -94,20 +107,34 @@ export function ChatPage({ client, questionnaireId, saved, active, blocked, onHo
 
   async function send(event?: FormEvent) {
     event?.preventDefault()
-    if (!chat || sending.current || busy || deleting || blocked || chat.emergency || (chat.pending && !chat.retryable)) return
-    const message = pending.current || { text: draft.trim(), client_message_id: crypto.randomUUID() }
+    if (!chat || sending.current || busy || deleting || blocked || chat.emergency || waitingForReply) return
+    const message = previousMessage
+      ? { text: previousMessage.text, client_message_id: previousMessage.client_message_id! }
+      : pending.current || { text: draft.trim(), client_message_id: crypto.randomUUID() }
     if (!message.text) return
-    pending.current = message
+    if (!previousMessage) pending.current = message
     sending.current = true; setBusy(true); setError('')
     try {
       const value = await client.send(chat.id, message)
       if (alive.current) accept(value)
     } catch (cause) {
       if (alive.current) {
-        setError(errorText(cause))
+        if (cause instanceof ApiError && (cause.status === 400 || cause.status === 422 || cause.code === 'idempotency_conflict')) {
+          if (!previousMessage) pending.current = null
+          setError(errorText(cause, 'Сообщение не принято. Проверьте текст и отправьте снова.'))
+          return
+        }
+        setError(errorText(cause, 'Не удалось проверить, сохранилось ли сообщение. Обновите чат или повторите отправку.'))
         try {
           const current = await client.get(chat.id)
-          if (alive.current) { accept(current); if (!current.pending && !pending.current) setError('') }
+          if (alive.current) {
+            accept(current)
+            const savedMessage = current.messages.some((row) => row.client_message_id === message.client_message_id && row.text === message.text)
+            const surveyBlockedReply = cause instanceof ApiError &&
+              (cause.code === 'questionnaire_in_progress' || cause.code === 'questionnaire_changed')
+            setError(savedMessage && !surveyBlockedReply ? '' :
+              errorText(cause, 'Сообщение не найдено в переписке. Нажмите «Повторить отправку».'))
+          }
         } catch (failure) {
           if (alive.current && failure instanceof ApiError && failure.status === 404) {
             setChat(null); setError(errorText(failure))
@@ -122,7 +149,11 @@ export function ChatPage({ client, questionnaireId, saved, active, blocked, onHo
   async function refresh() {
     if (!chat || busy) return
     setBusy(true); setError('')
-    try { accept(await client.get(chat.id)) }
+    try {
+      const value = await client.get(chat.id)
+      accept(value)
+      if (!value.pending && pending.current) setError('Сообщение не найдено в переписке. Нажмите «Повторить отправку».')
+    }
     catch (cause) {
       if (cause instanceof ApiError && cause.status === 404) setChat(null)
       setError(errorText(cause))
@@ -177,19 +208,27 @@ export function ChatPage({ client, questionnaireId, saved, active, blocked, onHo
       <p>Позвоните 103/112. Не ждите продолжения переписки.</p>
       <div className="emergency-actions"><a className="button button--primary" href="tel:103">Позвонить 103</a><a className="button button--secondary" href="tel:112">Позвонить 112</a></div>
     </Card>}
-    {(busy || (chat?.pending && !chat.retryable)) && <p className="survey-loading" role="status">{chat ? 'МедВед отвечает…' : 'Открываем чат…'}</p>}
+    {busy && <p className="survey-loading" role="status">
+      {!chat ? 'Открываем чат…' : sending.current ? 'Отправляем сообщение…' : 'Обновляем переписку…'}
+    </p>}
+    {!busy && !error && chat?.pending && <p className="survey-loading" role="status">
+      {previousMessage ? chat.retryable ? 'Повторите отправку предыдущего сообщения, чтобы продолжить.'
+        : 'Предыдущее сообщение сохранено. МедВед готовит ответ…'
+        : chat.retryable ? 'Сообщение сохранено, но ответ не получен. Нажмите «Повторить отправку».'
+          : 'Сообщение сохранено. МедВед готовит ответ…'}
+    </p>}
     {error && <div className="survey-error" role="alert"><p>{error}</p></div>}
     {!chat && !busy && <Button icon="restart" onClick={() => setAttempt((value) => value + 1)}>Повторить открытие</Button>}
     {chat && !chat.emergency && <form className="chat-composer" onSubmit={(event) => { void send(event) }}>
       <label htmlFor="chat-message">Ваше сообщение</label>
-      <textarea id="chat-message" maxLength={2000} rows={3} value={draft} disabled={busy || blocked || (chat.pending && !chat.retryable)}
+      <textarea id="chat-message" maxLength={2000} rows={3} value={draft} disabled={busy || blocked || waitingForReply}
         readOnly={!!pending.current} onChange={(event) => setDraft(event.target.value)}
         placeholder="Что вы хотите уточнить?"
         onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }} />
       <p className="field-hint">До 2000 символов. Не указывайте имя, телефон, адрес и данные документов.</p>
       <div className="form-actions">
-        <Button icon="arrow-right" type="submit" disabled={busy || blocked || !draft.trim() || (chat.pending && !chat.retryable)}>
-          {pending.current ? 'Повторить отправку' : 'Отправить'}
+        <Button icon="arrow-right" type="submit" disabled={busy || blocked || !draft.trim() || waitingForReply}>
+          {previousMessage ? 'Повторить предыдущее сообщение' : pending.current ? 'Повторить отправку' : 'Отправить'}
         </Button>
         {(error || chat.pending) && <Button icon="restart" variant="secondary" disabled={busy} onClick={() => { void refresh() }}>Обновить чат</Button>}
       </div>
