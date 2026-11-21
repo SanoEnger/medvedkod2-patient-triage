@@ -1,8 +1,8 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, test, vi } from 'vitest'
 import { ApiError } from '../../api/client'
-import type { ChatClient, Conversation } from '../../api/chat'
+import type { ChatClient, ChatSummary, Conversation } from '../../api/chat'
 import { ChatPage } from './ChatPage'
 
 function fixture() {
@@ -18,6 +18,7 @@ function fixture() {
     return structuredClone(chat)
   })
   const client: ChatClient = {
+    list: vi.fn(async () => ({ items: [], next_cursor: null })),
     availability: vi.fn(async () => ({ active_survey: null })),
     open: vi.fn(async () => structuredClone(chat)),
     get: vi.fn(async () => structuredClone(chat)),
@@ -80,4 +81,25 @@ test('emergency response replaces the composer with accessible phone links', asy
   await waitFor(() => expect(screen.queryByLabelText('Ваше сообщение')).not.toBeInTheDocument())
   expect(screen.getByRole('link', { name: 'Позвонить 103' })).toHaveAttribute('href', 'tel:103')
   expect(screen.getByRole('link', { name: 'Позвонить 112' })).toHaveAttribute('href', 'tel:112')
+})
+
+test('saved pending message is rendered as text and retried using its original ID', async () => {
+  const { client, send } = fixture()
+  const chat = await client.get('saved')
+  const html = '<img src="synthetic.png" alt="synthetic-history-image">'
+  const now = new Date().toISOString()
+  const message = { id: crypto.randomUUID(), role: 'user' as const, text: html, created_at: now,
+    emergency: false, client_message_id: crypto.randomUUID() }
+  vi.mocked(client.get).mockResolvedValue({ ...chat, messages: [...chat.messages, message], pending: true, retryable: true })
+  vi.mocked(client.open).mockClear()
+  const saved: ChatSummary = { id: chat.id, kind: 'chat', title: 'Чат от 21 ноября', created_at: now,
+    last_activity_at: now, expires_at: now, emergency: false }
+  render(<ChatPage client={client} saved={saved} active blocked={false} onHome={vi.fn()} onSurvey={vi.fn()} onNew={vi.fn()} />)
+  const user = userEvent.setup()
+  expect(await within(await screen.findByRole('log')).findByText(html)).toBeVisible()
+  expect(screen.queryByAltText('synthetic-history-image')).toBeNull()
+  expect(client.open).not.toHaveBeenCalled()
+  expect(client.get).toHaveBeenLastCalledWith(saved.id, expect.any(AbortSignal))
+  await user.click(screen.getByRole('button', { name: 'Повторить отправку' }))
+  expect(send).toHaveBeenCalledWith(saved.id, { text: html, client_message_id: message.client_message_id })
 })

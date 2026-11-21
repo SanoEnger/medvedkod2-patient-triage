@@ -1,24 +1,26 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ApiError } from '../../api/client'
-import type { ChatClient, Conversation } from '../../api/chat'
+import type { ChatClient, ChatSummary, Conversation } from '../../api/chat'
 import { Button, Card } from '../../components/ui'
 import medvedUrl from '../../assets/medved-bear-button.svg?url'
+import { DeleteChatDialog } from './DeleteChatDialog'
 
 type Message = { text: string; client_message_id: string }
 function errorText(error: unknown) {
   if (error instanceof ApiError) {
     if (error.status === 409) return 'Сейчас чат недоступен. Завершите или удалите текущий опрос, затем вернитесь в чат.'
-    if (error.status === 401 || error.status === 403) return 'Доступ истёк. Откройте приложение заново.'
+    if (error.status === 401 || error.status === 403) return 'Доступ истёк. Снова откройте приложение в MAX.'
     if (error.status === 404) return 'Чат удалён или срок его хранения истёк. Начните новый чат.'
     if (error.status === 429) return 'Слишком много сообщений. Подождите немного и повторите.'
   }
-  return 'МедВед пока не смог ответить. Ваше сообщение сохранено для повторной отправки.'
+  return 'Не удалось обновить переписку. Повторите попытку.'
 }
 
-export function ChatPage({ client, questionnaireId, active, blocked, onHome, onSurvey, onNew }: {
-  client: ChatClient; questionnaireId?: string; active: boolean; blocked: boolean
+export function ChatPage({ client, questionnaireId, saved, active, blocked, onHome, onHistory, onSurvey, onNew, onDeleted }: {
+  client: ChatClient; questionnaireId?: string; saved?: ChatSummary; active: boolean; blocked: boolean
   onHome: () => void; onSurvey: () => void; onNew: () => void
+  onHistory?: () => void; onDeleted?: (id: string) => void
 }) {
   const [chat, setChat] = useState<Conversation | null>(null)
   const [draft, setDraft] = useState('')
@@ -26,13 +28,14 @@ export function ChatPage({ client, questionnaireId, active, blocked, onHome, onS
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const pending = useRef<Message | null>(null)
   const alive = useRef(true)
   const sending = useRef(false)
   const refreshOnReturn = useRef(false)
   const heading = useRef<HTMLHeadingElement>(null)
   const bottom = useRef<HTMLDivElement>(null)
-  const dialog = useRef<HTMLDialogElement>(null)
+  const savedId = saved?.id
 
   function accept(value: Conversation) {
     setChat(value)
@@ -51,12 +54,15 @@ export function ChatPage({ client, questionnaireId, active, blocked, onHome, onS
     alive.current = true
     const controller = new AbortController()
     setBusy(true); setError('')
-    client.open(questionnaireId, controller.signal).then(
+    const load = savedId ? client.get(savedId, controller.signal) : client.open(questionnaireId, controller.signal)
+    load.then(
       (value) => { if (alive.current && !controller.signal.aborted) accept(value) },
-      () => { if (alive.current && !controller.signal.aborted) setError('Не удалось открыть чат. Повторите попытку или вернитесь к опросу.') },
+      (cause) => { if (alive.current && !controller.signal.aborted) setError(
+        cause instanceof ApiError && [401, 403, 404].includes(cause.status) ? errorText(cause) : 'Не удалось открыть чат. Повторите попытку.',
+      ) },
     ).finally(() => { if (alive.current && !controller.signal.aborted) setBusy(false) })
     return () => { alive.current = false; controller.abort() }
-  }, [client, questionnaireId, attempt])
+  }, [client, questionnaireId, savedId, attempt])
   useEffect(() => { if (active) heading.current?.focus() }, [active])
   useEffect(() => {
     if (!active) { refreshOnReturn.current = true; return }
@@ -71,24 +77,24 @@ export function ChatPage({ client, questionnaireId, active, blocked, onHome, onS
   }, [active, chat?.id, client])
   useEffect(() => { if (active) bottom.current?.scrollIntoView({ block: 'nearest' }) }, [chat?.messages.length, active])
   useEffect(() => {
-    if (confirmDelete) dialog.current?.showModal()
-    else dialog.current?.close()
-  }, [confirmDelete])
-  useEffect(() => {
-    if (!chat?.pending || chat.retryable || busy || blocked) return
+    if (!active || !chat?.pending || chat.retryable || busy || deleting) return
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
       client.get(chat.id, controller.signal).then(
         (value) => { if (alive.current && !controller.signal.aborted) accept(value) },
-        () => { if (alive.current && !controller.signal.aborted) setError('Не удалось обновить переписку. Нажмите «Обновить чат».') },
+        (cause) => {
+          if (!alive.current || controller.signal.aborted) return
+          if (cause instanceof ApiError && cause.status === 404) { setChat(null); setError(errorText(cause)) }
+          else setError('Не удалось обновить переписку. Нажмите «Обновить чат».')
+        },
       )
     }, 1500)
     return () => { clearTimeout(timer); controller.abort() }
-  }, [chat, busy, blocked, client])
+  }, [chat, active, busy, deleting, client])
 
   async function send(event?: FormEvent) {
     event?.preventDefault()
-    if (!chat || sending.current || busy || blocked || chat.emergency || (chat.pending && !chat.retryable)) return
+    if (!chat || sending.current || busy || deleting || blocked || chat.emergency || (chat.pending && !chat.retryable)) return
     const message = pending.current || { text: draft.trim(), client_message_id: crypto.randomUUID() }
     if (!message.text) return
     pending.current = message
@@ -102,7 +108,11 @@ export function ChatPage({ client, questionnaireId, active, blocked, onHome, onS
         try {
           const current = await client.get(chat.id)
           if (alive.current) { accept(current); if (!current.pending && !pending.current) setError('') }
-        } catch { /* Keep the immutable message for retry. */ }
+        } catch (failure) {
+          if (alive.current && failure instanceof ApiError && failure.status === 404) {
+            setChat(null); setError(errorText(failure))
+          }
+        }
       }
     } finally {
       sending.current = false
@@ -113,25 +123,41 @@ export function ChatPage({ client, questionnaireId, active, blocked, onHome, onS
     if (!chat || busy) return
     setBusy(true); setError('')
     try { accept(await client.get(chat.id)) }
-    catch (cause) { setError(errorText(cause)) }
+    catch (cause) {
+      if (cause instanceof ApiError && cause.status === 404) setChat(null)
+      setError(errorText(cause))
+    }
     finally { setBusy(false) }
   }
   async function remove() {
-    if (!chat || busy) return
-    setBusy(true); setError('')
-    try { await client.delete(chat.id); setConfirmDelete(false); onNew() }
-    catch (cause) { setError(errorText(cause)) }
-    finally { setBusy(false) }
+    if (!chat || deleting) return
+    setDeleting(true); setError('')
+    try {
+      await client.delete(chat.id)
+      if (alive.current) {
+        setConfirmDelete(false)
+        if (onDeleted) onDeleted(chat.id)
+        else onNew()
+      }
+    } catch {
+      if (alive.current) { setConfirmDelete(false); setError('Не удалось удалить чат. Повторите попытку.') }
+    } finally {
+      if (alive.current) setDeleting(false)
+    }
   }
 
   return <div className="chat-page">
     <div className="form-actions">
-      <Button icon="home" variant="secondary" disabled={busy} onClick={onHome}>На главную</Button>
+      <Button icon="home" variant="secondary" onClick={onHome}>На главную</Button>
+      {onHistory && <Button icon="chat" variant="secondary" onClick={onHistory}>История чатов</Button>}
       {questionnaireId && <Button icon="clipboard" variant="secondary" disabled={busy} onClick={onSurvey}>К результату опроса</Button>}
     </div>
     <header className="chat-heading">
       <img src={medvedUrl} width={48} height={48} alt="" />
-      <div><h1 ref={heading} tabIndex={-1}>Чат с МедВедом</h1><p>Помогу уточнить вопрос и подготовиться к обращению к врачу.</p></div>
+      <div><h1 ref={heading} tabIndex={-1}>Чат с МедВедом</h1>
+        {saved ? <p>{saved.kind === 'questionnaire' ? 'Чат по опросу' : 'Отдельный чат'} · <time dateTime={saved.created_at}>{new Date(saved.created_at).toLocaleDateString('ru-RU')}</time></p>
+          : <p>Помогу уточнить вопрос и подготовиться к обращению к врачу.</p>}
+      </div>
     </header>
     {blocked && <Card className="chat-blocked"><p>Пока идёт опрос, переписка приостановлена.</p><Button icon="clipboard" onClick={onSurvey}>Продолжить опрос</Button></Card>}
     {chat?.result && <details className="chat-context">
@@ -165,16 +191,14 @@ export function ChatPage({ client, questionnaireId, active, blocked, onHome, onS
         <Button icon="arrow-right" type="submit" disabled={busy || blocked || !draft.trim() || (chat.pending && !chat.retryable)}>
           {pending.current ? 'Повторить отправку' : 'Отправить'}
         </Button>
-        {error && <Button icon="restart" variant="secondary" disabled={busy} onClick={() => { void refresh() }}>Обновить чат</Button>}
+        {(error || chat.pending) && <Button icon="restart" variant="secondary" disabled={busy} onClick={() => { void refresh() }}>Обновить чат</Button>}
       </div>
     </form>}
     {chat && <div className="chat-actions">
       <Button icon="restart" variant="secondary" disabled={busy || blocked} onClick={onNew}>Новый чат</Button>
-      {!chat.questionnaire_id && <Button variant="secondary" disabled={busy} onClick={() => setConfirmDelete(true)}>Удалить чат</Button>}
+      <Button variant="secondary" onClick={() => setConfirmDelete(true)}>Удалить чат</Button>
     </div>}
-    <dialog className="delete-dialog" ref={dialog} aria-labelledby="delete-chat-title" onCancel={() => setConfirmDelete(false)} onClose={() => setConfirmDelete(false)}>
-      <h2 id="delete-chat-title">Удалить этот чат?</h2><p>Переписка будет удалена.</p>
-      <div className="form-actions"><Button variant="secondary" autoFocus disabled={busy} onClick={() => setConfirmDelete(false)}>Отмена</Button><Button disabled={busy} onClick={() => { void remove() }}>Удалить</Button></div>
-    </dialog>
+    <DeleteChatDialog open={confirmDelete} questionnaire={!!chat?.questionnaire_id} busy={deleting}
+      onCancel={() => setConfirmDelete(false)} onDelete={() => { void remove() }} />
   </div>
 }

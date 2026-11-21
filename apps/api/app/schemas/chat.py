@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -44,3 +45,22 @@ class ChatResponse(StrictModel):
 
 class ChatAvailability(StrictModel):
     active_survey: SessionResponse | None
+
+
+class ChatSummary(StrictModel):
+    id: UUID
+    kind: Literal["chat", "questionnaire"]
+    title: str
+    created_at: datetime
+    last_activity_at: datetime
+    expires_at: datetime
+    emergency: bool
+
+
+class ChatHistory(StrictModel):
+    items: list[ChatSummary]
+    next_cursor: str | None
+
+
+class ChatError(StrictModel):
+    detail: str

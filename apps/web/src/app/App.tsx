@@ -1,21 +1,52 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { HostContext, MaxHostAdapter } from '../max/MaxHostAdapter'
 import type { Survey } from '../api/contracts'
+import type { ChatSummary } from '../api/chat'
 import { ErrorState, LoadingState } from '../components/ScreenState'
 import { Button } from '../components/ui'
 import { WelcomePage } from '../pages/WelcomePage'
 import { QuestionnairePage } from '../features/questionnaire/QuestionnairePage'
 import { ChatPage } from '../features/chat/ChatPage'
+import { ChatHistoryPage } from '../features/chat/ChatHistoryPage'
 import { createApiClient } from '../api/client'
+import type { MedvedClient } from '../api/client'
 import { AppShell } from './AppShell'
 
-type LaunchState = { status: 'loading' } | { status: 'error' } | { status: 'ready'; context: HostContext }
+type LaunchState = { adapter: MaxHostAdapter; context?: HostContext }
 const inProgress = (survey: Survey | null) => !!survey && ['COLLECTING', 'REVIEWING'].includes(survey.status)
 
 export function App({ hostAdapter }: { hostAdapter?: MaxHostAdapter }) {
-  const [launch, setLaunch] = useState<LaunchState>({ status: 'loading' })
+  const [launch, setLaunch] = useState<LaunchState>()
   const [attempt, setAttempt] = useState(0)
-  const [page, setPage] = useState<'welcome' | 'survey' | 'chat'>('welcome')
+  const current = launch?.adapter === hostAdapter ? launch : undefined
+  const mode = current?.context?.mode
+  const client = useMemo(() => mode ? createApiClient(mode, () => {
+    setLaunch((active) => active === current && hostAdapter ? { adapter: hostAdapter } : active)
+  }) : undefined, [mode, current, hostAdapter])
+
+  useEffect(() => {
+    let active = true
+    if (!hostAdapter) return
+    hostAdapter.initialize().then(
+      (context) => { if (active) setLaunch({ adapter: hostAdapter, context }) },
+      () => { if (active) setLaunch({ adapter: hostAdapter }) },
+    )
+    return () => { active = false }
+  }, [hostAdapter, attempt])
+
+  return <AppShell mode={mode}>
+    {client ? <Workspace client={client} />
+      : !hostAdapter || current
+        ? <ErrorState missingHost={!hostAdapter} hostLaunch={hostAdapter?.kind === 'host'}
+          onRetry={() => { setLaunch(undefined); setAttempt((value) => value + 1) }} />
+        : <LoadingState />}
+  </AppShell>
+}
+
+type Page = 'welcome' | 'survey' | 'chat' | 'history'
+
+function Workspace({ client }: { client: MedvedClient }) {
+  const [page, setPage] = useState<Page>('welcome')
   const [survey, setSurvey] = useState<Survey | null>(null)
   const [serverSurvey, setServerSurvey] = useState<Survey | null>(null)
   const [initialSurvey, setInitialSurvey] = useState<Survey | null>(null)
@@ -24,25 +55,13 @@ export function App({ hostAdapter }: { hostAdapter?: MaxHostAdapter }) {
   const [checking, setChecking] = useState(true)
   const [availabilityError, setAvailabilityError] = useState(false)
   const [refresh, setRefresh] = useState(0)
-  const [chatTarget, setChatTarget] = useState<{ questionnaireId?: string; key: string } | null>(null)
+  const [chatTarget, setChatTarget] = useState<{ questionnaireId?: string; saved?: ChatSummary; key: string } | null>(null)
   const focusAfterNavigation = useRef(false)
-  const mode = launch.status === 'ready' ? launch.context.mode : undefined
-  const client = useMemo(() => mode ? createApiClient(mode) : undefined, [mode])
   const activeSurvey = inProgress(survey) ? survey
     : serverSurvey && !(survey?.id === serverSurvey.id && !inProgress(survey)) ? serverSurvey : null
   const chatBlocked = checking || availabilityError || !!activeSurvey || survey?.status === 'EMERGENCY_STOP'
 
   useEffect(() => {
-    let active = true
-    if (!hostAdapter) return
-    hostAdapter.initialize().then(
-      (context) => { if (active) setLaunch({ status: 'ready', context }) },
-      () => { if (active) setLaunch({ status: 'error' }) },
-    )
-    return () => { active = false }
-  }, [hostAdapter, attempt])
-  useEffect(() => {
-    if (!client) return
     const controller = new AbortController()
     client.chat.availability(controller.signal).then(
       ({ active_survey }) => { if (!controller.signal.aborted) { setServerSurvey(active_survey); setAvailabilityError(false) } },
@@ -56,7 +75,7 @@ export function App({ hostAdapter }: { hostAdapter?: MaxHostAdapter }) {
       window.scrollTo(0, 0)
     }
   }, [page])
-  function navigate(next: 'welcome' | 'survey' | 'chat') {
+  function navigate(next: Page) {
     focusAfterNavigation.current = true
     setPage(next)
     if (next === 'welcome') setRefresh((value) => value + 1)
@@ -71,33 +90,41 @@ export function App({ hostAdapter }: { hostAdapter?: MaxHostAdapter }) {
     navigate('survey')
   }
   function openChat(questionnaireId?: string, forceNew = false) {
-    if (questionnaireId || !chatTarget || forceNew) {
-      if (forceNew || !chatTarget || chatTarget.questionnaireId !== questionnaireId) {
-        setChatTarget({ questionnaireId, key: crypto.randomUUID() })
-      }
+    if (forceNew || !chatTarget || chatTarget.saved || (questionnaireId && chatTarget.questionnaireId !== questionnaireId)) {
+      setChatTarget({ questionnaireId, key: crypto.randomUUID() })
     }
     navigate('chat')
   }
-  const retry = () => { setLaunch({ status: 'loading' }); setAttempt((value) => value + 1) }
-  return <AppShell mode={mode}>
-    {!hostAdapter || launch.status === 'error'
-      ? <ErrorState missingHost={!hostAdapter} hostLaunch={hostAdapter?.kind === 'host'} onRetry={retry} />
-      : launch.status === 'loading'
-        ? <LoadingState />
-        : <>
-          {page === 'welcome' && <><WelcomePage onStart={startSurvey} onChat={() => openChat()} surveyInProgress={!!activeSurvey} chatBlocked={chatBlocked} />
-            {availabilityError && <div className="survey-error" role="alert"><p>Не удалось проверить текущий опрос. Чат временно недоступен.</p><Button icon="restart" variant="secondary" onClick={() => { setChecking(true); setRefresh((value) => value + 1) }}>Повторить проверку</Button></div>}
-          </>}
-          {client && surveyOpened && <div hidden={page !== 'survey'}>
-            <QuestionnairePage key={surveyKey} client={client} initialSurvey={initialSurvey} active={page === 'survey'} onSessionChange={setSurvey}
-              onHome={() => navigate('welcome')} onChat={(id) => openChat(id)} />
-          </div>}
-          {client && chatTarget && <div hidden={page !== 'chat'}>
-            <ChatPage key={chatTarget.key} client={client.chat} questionnaireId={chatTarget.questionnaireId}
-              active={page === 'chat'} blocked={chatBlocked} onHome={() => navigate('welcome')}
-              onSurvey={() => { if (surveyOpened && !inProgress(activeSurvey)) navigate('survey'); else startSurvey() }}
-              onNew={() => openChat(undefined, true)} />
-          </div>}
-        </>}
-  </AppShell>
+  function openSaved(saved: ChatSummary) {
+    setChatTarget({ saved, key: crypto.randomUUID() })
+    navigate('chat')
+  }
+  function chatDeleted(id: string) {
+    setChatTarget(null)
+    if (survey?.id === id) {
+      setSurvey(null)
+      setInitialSurvey(null)
+      setSurveyOpened(false)
+    }
+  }
+
+  return <>
+    {page === 'welcome' && <><WelcomePage onStart={startSurvey} onChat={() => openChat()} onHistory={() => navigate('history')}
+      surveyInProgress={!!activeSurvey} chatBlocked={chatBlocked} />
+      {availabilityError && <div className="survey-error" role="alert"><p>Не удалось проверить текущий опрос. Чат временно недоступен.</p><Button icon="restart" variant="secondary" onClick={() => { setChecking(true); setRefresh((value) => value + 1) }}>Повторить проверку</Button></div>}
+    </>}
+    {page === 'history' && <ChatHistoryPage client={client.chat} onHome={() => navigate('welcome')} onOpen={openSaved} onDeleted={chatDeleted} />}
+    {surveyOpened && <div hidden={page !== 'survey'}>
+      <QuestionnairePage key={surveyKey} client={client} initialSurvey={initialSurvey} active={page === 'survey'} onSessionChange={setSurvey}
+        onHome={() => navigate('welcome')} onChat={(id) => openChat(id)} />
+    </div>}
+    {chatTarget && <div hidden={page !== 'chat'}>
+      <ChatPage key={chatTarget.key} client={client.chat} questionnaireId={chatTarget.questionnaireId} saved={chatTarget.saved}
+        active={page === 'chat'} blocked={chatBlocked} onHome={() => navigate('welcome')}
+        onHistory={() => { setChatTarget(null); navigate('history') }}
+        onSurvey={() => { if (surveyOpened && !inProgress(activeSurvey)) navigate('survey'); else startSurvey() }}
+        onNew={() => openChat(undefined, true)}
+        onDeleted={(id) => { chatDeleted(id); navigate('history') }} />
+    </div>}
+  </>
 }

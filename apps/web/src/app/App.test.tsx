@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import * as api from '../api/client'
 import type { MedvedClient } from '../api/client'
-import type { Conversation } from '../api/chat'
+import type { ChatSummary, Conversation } from '../api/chat'
 import type { Survey } from '../api/contracts'
 import { createMockClient } from '../api/mock'
 import { App } from './App'
@@ -26,6 +26,7 @@ test('survey remains mounted on home, blocks chat, then hands its result to MedV
     back: async (...args) => { current = await base.back(...args); return current },
     triage: async (id) => { const result = await base.triage(id); current = await base.get(id); return result },
     chat: {
+      list: vi.fn(),
       availability: async () => ({ active_survey: current && ['COLLECTING', 'REVIEWING'].includes(current.status) ? current : null }),
       open, get: async (id) => conversation(id), send: vi.fn(), delete: vi.fn(),
     },
@@ -57,4 +58,46 @@ test('survey remains mounted on home, blocks chat, then hands its result to MedV
   await screen.findByText('Готов обсудить ваш результат.')
   expect(open).toHaveBeenCalledWith(current!.id, expect.any(AbortSignal))
   expect(screen.getByText('Результат вашего опроса')).toBeVisible()
+})
+
+test('history opens with an active survey, and changing MAX identity clears the old chat', async () => {
+  const base = createMockClient('unknown')
+  const activeSurvey = await base.create()
+  const id = crypto.randomUUID()
+  const date = new Date().toISOString()
+  const saved: ChatSummary = { id, kind: 'chat', title: 'Чат от 21 ноября', created_at: date,
+    last_activity_at: date, expires_at: date, emergency: true }
+  const open = vi.fn()
+  const list = vi.fn<MedvedClient['chat']['list']>()
+    .mockRejectedValueOnce(new api.ApiError(503))
+    .mockResolvedValueOnce({ items: [], next_cursor: 'next-page' })
+    .mockResolvedValueOnce({ items: [saved], next_cursor: null })
+    .mockResolvedValue({ items: [], next_cursor: null })
+  const get = vi.fn(async (): Promise<Conversation> => ({
+    id, questionnaire_id: null, result: null, emergency: true, pending: false, retryable: false,
+    messages: [{ id: crypto.randomUUID(), role: 'assistant', text: 'Синтетическая переписка владельца', created_at: date, emergency: true }],
+  }))
+  vi.spyOn(api, 'createApiClient').mockReturnValue({
+    ...base, chat: { list, open, get, send: vi.fn(), delete: vi.fn(), availability: async () => ({ active_survey: activeSurvey }) },
+  })
+  const first = { kind: 'host' as const, initialize: async () => ({ mode: 'max' as const }) }
+  const second = { ...first }
+  const { rerender } = render(<App hostAdapter={first} />)
+  const user = userEvent.setup()
+  await screen.findByRole('button', { name: 'Продолжить опрос' })
+  expect(screen.getByRole('button', { name: 'Начать чат с МедВедом' })).toBeDisabled()
+  await user.click(screen.getByRole('button', { name: 'История чатов' }))
+  await user.click(await screen.findByRole('button', { name: 'Повторить загрузку' }))
+  await user.click(await screen.findByRole('button', { name: 'Показать ещё' }))
+  expect(list).toHaveBeenLastCalledWith('next-page', expect.any(AbortSignal))
+  await user.click(await screen.findByRole('button', { name: /^Открыть: Чат от/ }))
+  expect(await screen.findByText('Синтетическая переписка владельца')).toBeVisible()
+  expect(screen.queryByLabelText('Ваше сообщение')).toBeNull()
+  expect(screen.getByRole('link', { name: 'Позвонить 112' })).toHaveAttribute('href', 'tel:112')
+  expect(open).not.toHaveBeenCalled()
+  expect(get).toHaveBeenCalledWith(id, expect.any(AbortSignal))
+  rerender(<App hostAdapter={second} />)
+  await user.click(await screen.findByRole('button', { name: 'История чатов' }))
+  expect(await screen.findByText('Сохранённых чатов пока нет.')).toBeVisible()
+  expect(screen.queryByText('Синтетическая переписка владельца')).toBeNull()
 })

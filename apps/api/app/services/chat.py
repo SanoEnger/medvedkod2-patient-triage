@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from uuid import uuid5
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select, true, tuple_
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.encryption import (
@@ -13,6 +13,7 @@ from app.core.encryption import (
     message_context,
     state_context,
 )
+from app.core.observability import event
 from app.db.models import AnswerRecord, MessageRecord, SessionRecord
 from app.db.repository import (
     append_message,
@@ -24,14 +25,15 @@ from app.db.repository import (
 from app.db.results import get_triage_result
 from app.integrations.chat_agent import AgentReply
 from app.integrations.groq.exceptions import GroqError
-from app.schemas.chat import ChatMessage, ChatResponse
+from app.schemas.chat import ChatHistory, ChatMessage, ChatResponse, ChatSummary
 from app.schemas.survey import SurveyStatus
 from app.services.safety import find_emergency_rules
 from app.services.sessions import EMERGENCY_MESSAGE
-from app.core.observability import event
 
 GREETING = "Здравствуйте! Я МедВед. Спросите, что вас беспокоит или что нужно уточнить перед обращением к врачу."
 FOLLOW_UP = "Я вижу ответы и результат вашего опроса. Что вы хотите уточнить?"
+MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня",
+          "июля", "августа", "сентября", "октября", "ноября", "декабря")
 
 
 class ChatService:
@@ -60,8 +62,45 @@ class ChatService:
             record = await self.active_survey(db, owner)
             return record.id if record else None
 
+    async def history(self, owner, limit, boundary):
+        latest = (
+            select(MessageRecord.id, MessageRecord.content_jsonb,
+                   func.max(MessageRecord.created_at).over().label("activity"))
+            .where(MessageRecord.session_id == SessionRecord.id, MessageRecord.kind == "text")
+            .order_by(MessageRecord.sequence_no.desc())
+            .limit(1)
+            .lateral()
+        )
+        query = (
+            select(SessionRecord.id, SessionRecord.kind, SessionRecord.created_at,
+                   SessionRecord.expires_at, latest.c.activity,
+                   latest.c.id.label("message_id"), latest.c.content_jsonb)
+            .join(latest, true())
+            .where(SessionRecord.owner_id == owner, SessionRecord.expires_at > func.now(),
+                   SessionRecord.status == SurveyStatus.COMPLETED)
+            .order_by(latest.c.activity.desc(), SessionRecord.id.desc())
+            .limit(limit + 1)
+        )
+        if boundary is not None:
+            query = query.where(tuple_(latest.c.activity, SessionRecord.id) < boundary)
+        async with self.transaction() as db:
+            rows = (await db.execute(query)).all()
+            items = []
+            for row in rows[:limit]:
+                value = self.cipher.decrypt(row.content_jsonb, message_context(row.id, row.message_id))
+                date = row.created_at.astimezone(UTC)
+                items.append(ChatSummary(
+                    id=row.id, kind=row.kind, title=f"Чат от {date.day} {MONTHS[date.month - 1]}",
+                    created_at=row.created_at, last_activity_at=row.activity, expires_at=row.expires_at,
+                    emergency=value.get("emergency", False),
+                ))
+            cursor = None
+            if len(rows) > limit:
+                last = items[-1]
+                cursor = f"{last.last_activity_at.isoformat()}|{last.id}"
+            return ChatHistory(items=items, next_cursor=cursor)
+
     async def available(self, db, owner):
-        await lock_owner(db, owner)
         if await self.active_survey(db, owner) is not None:
             raise HTTPException(status_code=409, detail="questionnaire_in_progress")
 
@@ -82,10 +121,13 @@ class ChatService:
         return self.cipher.decrypt(row.content_jsonb, message_context(row.session_id, row.id))
 
     async def response(self, db, record, owner):
+        rows = await self.rows(db, record.id)
+        if not rows:
+            raise HTTPException(status_code=404, detail="chat_not_found")
         messages = []
         pending = False
         retryable = False
-        for row in await self.rows(db, record.id):
+        for row in rows:
             value = self.content(row)
             messages.append(ChatMessage(id=row.id, role=row.role, text=value["text"],
                 created_at=row.created_at.isoformat(), emergency=value.get("emergency", False),
@@ -105,6 +147,7 @@ class ChatService:
 
     async def open(self, owner, questionnaire_id=None):
         async with self.transaction() as db:
+            await lock_owner(db, owner)
             await self.available(db, owner)
             if questionnaire_id:
                 record = await self.session(db, questionnaire_id, owner)
@@ -145,14 +188,13 @@ class ChatService:
         message_id = uuid5(identifier, str(request.client_message_id))
         reply_id = uuid5(message_id, "assistant")
         async with self.transaction() as db:
-            await self.available(db, owner)
+            await lock_owner(db, owner)
             record = await self.session(db, identifier, owner)
+            await self.available(db, owner)
             rows = await self.rows(db, identifier)
-            if any(self.content(row).get("emergency") for row in rows):
-                raise HTTPException(status_code=409, detail="chat_emergency_stop")
+            if not rows:
+                raise HTTPException(status_code=404, detail="chat_not_found")
             previous = next((row for row in rows if row.id == message_id), None)
-            if len(rows) >= 201 and previous is None:
-                raise HTTPException(status_code=429, detail="chat_message_limit")
             if previous:
                 value = self.content(previous)
                 if value["text"] != request.text:
@@ -161,8 +203,12 @@ class ChatService:
                     return await self.response(db, record, owner)
                 if value.get("processing_until", 0) > datetime.now(UTC).timestamp():
                     raise HTTPException(status_code=409, detail="chat_reply_pending")
-            else:
-                if rows and rows[-1].role == "user":
+            if any(self.content(row).get("emergency") for row in rows):
+                raise HTTPException(status_code=409, detail="chat_emergency_stop")
+            if previous is None:
+                if len(rows) >= 201:
+                    raise HTTPException(status_code=429, detail="chat_message_limit")
+                if rows[-1].role == "user":
                     raise HTTPException(status_code=409, detail="chat_turn_pending")
                 previous = await append_message(db, identifier, owner, "user", "text",
                     {"text": request.text}, cipher=self.cipher, message_id=message_id)
@@ -196,8 +242,9 @@ class ChatService:
                 raise
             raise HTTPException(status_code=503, detail="chat_agent_unavailable") from None
         async with self.transaction() as db:
-            await self.available(db, owner)
+            await lock_owner(db, owner)
             record = await self.session(db, identifier, owner)
+            await self.available(db, owner)
             _, current_revision = await self.context(db, record, owner)
             if current_revision != revision:
                 raise HTTPException(status_code=409, detail="questionnaire_changed")
@@ -211,6 +258,8 @@ class ChatService:
     async def delete(self, identifier, owner):
         async with self.transaction() as db:
             record = await self.session(db, identifier, owner)
-            if record.kind != "chat":
-                raise HTTPException(status_code=409, detail="delete_questionnaire_from_survey")
+            if not await db.scalar(select(MessageRecord.id).where(
+                MessageRecord.session_id == record.id, MessageRecord.kind == "text",
+            ).limit(1)):
+                raise HTTPException(status_code=404, detail="chat_not_found")
             await delete_session(db, identifier, owner, cipher=self.cipher)
