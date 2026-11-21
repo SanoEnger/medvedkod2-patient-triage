@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { ApiError } from '../../api/client'
-import type { ChatClient, ChatSummary } from '../../api/chat'
+import type { MedvedClient } from '../../api/client'
+import type { ChatSummary } from '../../api/chat'
 import { Button, Card } from '../../components/ui'
 import { DeleteChatDialog } from './DeleteChatDialog'
 
 const dateTime = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' })
+const historyKinds: Record<ChatSummary['kind'], string> = {
+  chat: 'Чат с МедВедом',
+  questionnaire: 'Уточнение по опросу',
+  questionnaire_result: 'Результат опроса',
+}
 
 export function ChatHistoryPage({ client, onHome, onOpen, onDeleted }: {
-  client: ChatClient; onHome: () => void; onOpen: (chat: ChatSummary) => void; onDeleted: (id: string) => void
+  client: MedvedClient; onHome: () => void; onOpen: (chat: ChatSummary) => void; onDeleted: (id: string) => void
 }) {
   const [items, setItems] = useState<ChatSummary[]>([])
   const [next, setNext] = useState<string | null>(null)
@@ -22,7 +28,7 @@ export function ChatHistoryPage({ client, onHome, onOpen, onDeleted }: {
   useEffect(() => {
     if (!request) return
     const controller = new AbortController()
-    client.list(request.cursor, controller.signal).then(({ items: page, next_cursor }) => {
+    client.chat.list(request.cursor, controller.signal).then(({ items: page, next_cursor }) => {
       if (controller.signal.aborted) return
       setItems((previous) => request.cursor ? [...previous, ...page] : page)
       setNext(next_cursor)
@@ -54,13 +60,14 @@ export function ChatHistoryPage({ client, onHome, onOpen, onDeleted }: {
     setDeleting(true)
     setError('')
     try {
-      await client.delete(selection.id, controller.signal)
+      if (selection.kind === 'questionnaire_result') await client.delete(selection.id, controller.signal)
+      else await client.chat.delete(selection.id, controller.signal)
       if (controller.signal.aborted) return
       setItems((previous) => previous.filter(({ id }) => id !== selection.id))
       onDeleted(selection.id)
       heading.current?.focus()
     } catch {
-      if (!controller.signal.aborted) setError('Не удалось удалить чат. Обновите историю или повторите удаление.')
+      if (!controller.signal.aborted) setError('Не удалось удалить обращение. Обновите историю или повторите удаление.')
     } finally {
       if (!controller.signal.aborted) {
         deletion.current = null
@@ -73,26 +80,32 @@ export function ChatHistoryPage({ client, onHome, onOpen, onDeleted }: {
   return <div className="chat-page">
     <Button icon="home" variant="secondary" onClick={onHome}>На главную</Button>
     <header className="chat-heading"><h1 ref={heading} tabIndex={-1}>История чатов</h1></header>
-    {items.length > 0 && <ul className="chat-history">{items.map((chat) => <li key={chat.id}>
-      <Card>
-        <h2>{chat.title}</h2>
-        <p>{chat.kind === 'questionnaire' ? 'Чат по опросу' : 'Отдельный чат'}</p>
-        <p>Последняя активность <time dateTime={chat.last_activity_at}>{dateTime.format(new Date(chat.last_activity_at))}</time></p>
-        <p>Хранится до <time dateTime={chat.expires_at}>{dateTime.format(new Date(chat.expires_at))}</time></p>
-        {chat.emergency && <p>Экстренная остановка. Только чтение.</p>}
-        <div className="form-actions">
-          <Button onClick={() => onOpen(chat)} aria-label={`Открыть: ${chat.title}, ${dateTime.format(new Date(chat.created_at))}`}>Открыть чат</Button>
-          <Button variant="secondary" onClick={() => setSelection(chat)} aria-label={`Удалить: ${chat.title}, ${dateTime.format(new Date(chat.created_at))}`}>Удалить чат</Button>
-        </div>
-      </Card>
-    </li>)}</ul>}
+    {items.length > 0 && <ul className="chat-history">{items.map((chat) => {
+      const type = historyKinds[chat.kind]
+      const createdAt = dateTime.format(new Date(chat.created_at))
+      const name = `${chat.title}, ${type}, ${createdAt}`
+      const resultOnly = chat.kind === 'questionnaire_result'
+      return <li key={chat.id}>
+        <Card>
+          <h2>{chat.title}</h2>
+          <p>{type} · <time dateTime={chat.created_at}>{createdAt}</time></p>
+          <p>Последняя активность <time dateTime={chat.last_activity_at}>{dateTime.format(new Date(chat.last_activity_at))}</time></p>
+          <p>Хранится до <time dateTime={chat.expires_at}>{dateTime.format(new Date(chat.expires_at))}</time></p>
+          {chat.emergency && <p>Экстренная остановка. Только чтение.</p>}
+          <div className="form-actions">
+            <Button onClick={() => onOpen(chat)} aria-label={`Открыть: ${name}`}>{resultOnly ? 'Открыть результат' : 'Открыть чат'}</Button>
+            <Button variant="secondary" onClick={() => setSelection(chat)} aria-label={`Удалить: ${name}`}>{resultOnly ? 'Удалить опрос' : 'Удалить чат'}</Button>
+          </div>
+        </Card>
+      </li>
+    })}</ul>}
     {request && <p className="survey-loading" role="status">Загружаем историю…</p>}
     {error && <div className="survey-error" role="alert"><p>{error}</p></div>}
-    {!request && !error && !items.length && !next && <Card><p>Сохранённых чатов пока нет.</p></Card>}
+    {!request && !error && !items.length && !next && <Card><p>Сохранённых чатов и результатов пока нет.</p></Card>}
     {retry && <Button icon="restart" variant="secondary" onClick={() => load(retry)}>Повторить загрузку</Button>}
     {!request && !retry && next && <Button variant="secondary" onClick={() => load({ cursor: next })}>Показать ещё</Button>}
     {!request && error && !retry && <Button icon="restart" variant="secondary" onClick={() => load({})}>Обновить историю</Button>}
-    <DeleteChatDialog open={!!selection} questionnaire={selection?.kind === 'questionnaire'} busy={deleting}
+    <DeleteChatDialog open={!!selection} kind={selection?.kind ?? 'chat'} busy={deleting}
       onCancel={() => setSelection(null)} onDelete={() => { void remove() }} />
   </div>
 }

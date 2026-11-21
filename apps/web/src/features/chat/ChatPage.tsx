@@ -198,7 +198,7 @@ export function ChatPage({ client, questionnaireId, saved, active, blocked, onHo
       <Button icon="restart" variant="secondary" disabled={busy || blocked} onClick={onNew}>Новый чат</Button>
       <Button variant="secondary" onClick={() => setConfirmDelete(true)}>Удалить чат</Button>
     </div>}
-    <DeleteChatDialog open={confirmDelete} questionnaire={!!chat?.questionnaire_id} busy={deleting}
+    <DeleteChatDialog open={confirmDelete} kind={chat?.questionnaire_id ? 'questionnaire' : 'chat'} busy={deleting}
       onCancel={() => setConfirmDelete(false)} onDelete={() => { void remove() }} />
   </div>
 }

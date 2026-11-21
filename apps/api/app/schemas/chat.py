@@ -49,7 +49,7 @@ class ChatAvailability(StrictModel):
 
 class ChatSummary(StrictModel):
     id: UUID
-    kind: Literal["chat", "questionnaire"]
+    kind: Literal["chat", "questionnaire", "questionnaire_result"]
     title: str
     created_at: datetime
     last_activity_at: datetime

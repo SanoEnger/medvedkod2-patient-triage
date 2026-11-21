@@ -66,7 +66,7 @@ export function parseChat(value: unknown): Conversation {
 }
 function parseChatHistory(value: unknown): ChatHistory {
   if (!object(value) || !nullableText(value.next_cursor) || !Array.isArray(value.items) || value.items.length > 20
-    || value.items.some((entry) => !object(entry) || !uuid(entry.id) || !['chat', 'questionnaire'].includes(String(entry.kind))
+    || value.items.some((entry) => !object(entry) || !uuid(entry.id) || !['chat', 'questionnaire', 'questionnaire_result'].includes(String(entry.kind))
       || typeof entry.title !== 'string' || typeof entry.emergency !== 'boolean'
       || !date(entry.created_at) || !date(entry.last_activity_at) || !date(entry.expires_at))) {
     throw new ApiError(0, false, true)

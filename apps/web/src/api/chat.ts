@@ -19,7 +19,7 @@ export interface Conversation {
 }
 export interface ChatSummary {
   id: string
-  kind: 'chat' | 'questionnaire'
+  kind: 'chat' | 'questionnaire' | 'questionnaire_result'
   title: string
   created_at: string
   last_activity_at: string

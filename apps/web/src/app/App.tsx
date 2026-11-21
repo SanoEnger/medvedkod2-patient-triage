@@ -6,6 +6,7 @@ import { ErrorState, LoadingState } from '../components/ScreenState'
 import { Button } from '../components/ui'
 import { WelcomePage } from '../pages/WelcomePage'
 import { QuestionnairePage } from '../features/questionnaire/QuestionnairePage'
+import { SavedSurveyResultPage } from '../features/questionnaire/SavedSurveyResultPage'
 import { ChatPage } from '../features/chat/ChatPage'
 import { ChatHistoryPage } from '../features/chat/ChatHistoryPage'
 import { createApiClient } from '../api/client'
@@ -43,7 +44,7 @@ export function App({ hostAdapter }: { hostAdapter?: MaxHostAdapter }) {
   </AppShell>
 }
 
-type Page = 'welcome' | 'survey' | 'chat' | 'history'
+type Page = 'welcome' | 'survey' | 'chat' | 'history' | 'result'
 
 function Workspace({ client }: { client: MedvedClient }) {
   const [page, setPage] = useState<Page>('welcome')
@@ -55,6 +56,7 @@ function Workspace({ client }: { client: MedvedClient }) {
   const [checking, setChecking] = useState(true)
   const [availabilityError, setAvailabilityError] = useState(false)
   const [refresh, setRefresh] = useState(0)
+  const [resultId, setResultId] = useState<string>()
   const [chatTarget, setChatTarget] = useState<{ questionnaireId?: string; saved?: ChatSummary; key: string } | null>(null)
   const focusAfterNavigation = useRef(false)
   const activeSurvey = inProgress(survey) ? survey
@@ -96,6 +98,11 @@ function Workspace({ client }: { client: MedvedClient }) {
     navigate('chat')
   }
   function openSaved(saved: ChatSummary) {
+    if (saved.kind === 'questionnaire_result') {
+      setResultId(saved.id)
+      navigate('result')
+      return
+    }
     setChatTarget({ saved, key: crypto.randomUUID() })
     navigate('chat')
   }
@@ -113,7 +120,9 @@ function Workspace({ client }: { client: MedvedClient }) {
       surveyInProgress={!!activeSurvey} chatBlocked={chatBlocked} />
       {availabilityError && <div className="survey-error" role="alert"><p>Не удалось проверить текущий опрос. Чат временно недоступен.</p><Button icon="restart" variant="secondary" onClick={() => { setChecking(true); setRefresh((value) => value + 1) }}>Повторить проверку</Button></div>}
     </>}
-    {page === 'history' && <ChatHistoryPage client={client.chat} onHome={() => navigate('welcome')} onOpen={openSaved} onDeleted={chatDeleted} />}
+    {page === 'history' && <ChatHistoryPage client={client} onHome={() => navigate('welcome')} onOpen={openSaved} onDeleted={chatDeleted} />}
+    {page === 'result' && resultId && <SavedSurveyResultPage key={resultId} id={resultId} client={client} chatBlocked={chatBlocked}
+      onHistory={() => navigate('history')} onChat={() => openChat(resultId)} />}
     {surveyOpened && <div hidden={page !== 'survey'}>
       <QuestionnairePage key={surveyKey} client={client} initialSurvey={initialSurvey} active={page === 'survey'} onSessionChange={setSurvey}
         onHome={() => navigate('welcome')} onChat={(id) => openChat(id)} />
@@ -122,7 +131,11 @@ function Workspace({ client }: { client: MedvedClient }) {
       <ChatPage key={chatTarget.key} client={client.chat} questionnaireId={chatTarget.questionnaireId} saved={chatTarget.saved}
         active={page === 'chat'} blocked={chatBlocked} onHome={() => navigate('welcome')}
         onHistory={() => { setChatTarget(null); navigate('history') }}
-        onSurvey={() => { if (surveyOpened && !inProgress(activeSurvey)) navigate('survey'); else startSurvey() }}
+        onSurvey={() => {
+          if (resultId && chatTarget.questionnaireId === resultId && !activeSurvey) navigate('result')
+          else if (surveyOpened && !inProgress(activeSurvey)) navigate('survey')
+          else startSurvey()
+        }}
         onNew={() => openChat(undefined, true)}
         onDeleted={(id) => { chatDeleted(id); navigate('history') }} />
     </div>}

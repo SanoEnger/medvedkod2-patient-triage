@@ -1,10 +1,11 @@
 import asyncio
+import re
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from uuid import uuid5
 
 from fastapi import HTTPException
-from sqlalchemy import func, select, true, tuple_
+from sqlalchemy import case, func, or_, select, true, tuple_
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.encryption import (
@@ -14,7 +15,7 @@ from app.core.encryption import (
     state_context,
 )
 from app.core.observability import event
-from app.db.models import AnswerRecord, MessageRecord, SessionRecord
+from app.db.models import AnswerRecord, MessageRecord, SessionRecord, TriageResultRecord
 from app.db.repository import (
     append_message,
     create_session,
@@ -25,15 +26,22 @@ from app.db.repository import (
 from app.db.results import get_triage_result
 from app.integrations.chat_agent import AgentReply
 from app.integrations.groq.exceptions import GroqError
+from app.integrations.prompt_security import instruction_attack, normalized
 from app.schemas.chat import ChatHistory, ChatMessage, ChatResponse, ChatSummary
 from app.schemas.survey import SurveyStatus
+from app.services.history_titles import complaint_title
 from app.services.safety import find_emergency_rules
 from app.services.sessions import EMERGENCY_MESSAGE
 
 GREETING = "Здравствуйте! Я МедВед. Спросите, что вас беспокоит или что нужно уточнить перед обращением к врачу."
 FOLLOW_UP = "Я вижу ответы и результат вашего опроса. Что вы хотите уточнить?"
-MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня",
-          "июля", "августа", "сентября", "октября", "ноября", "декабря")
+CHAT_TOPICS = (
+    ("Разбор результата опроса", r"\b(?:результат\w*|итог\w*)\s+(?:опрос\w*|анкет\w*)\b"),
+    ("Вопрос о срочности", r"\b(?:насколько срочно|как быстро обратиться|можно ли подождать|нужно ли срочно)\b"),
+    ("Вопрос о специалисте", r"\b(?:к какому врачу|какого врача выбрать|к кому обратиться|какой специалист|к какому специалисту)\b"),
+    ("Подготовка к приёму", r"\b(?:подготов\w*\s+к\s+(?:прием\w*|визит\w*)|что взять на прием\w*|что спросить у врач\w*|вопрос\w*\s+(?:для\s+)?врач\w*)\b"),
+    ("Вопрос об обследовании", r"\b(?:обследовани\w*|сдать анализ\w*|результат\w*\s+анализ\w*)\b"),
+)
 
 
 class ChatService:
@@ -62,7 +70,64 @@ class ChatService:
             record = await self.active_survey(db, owner)
             return record.id if record else None
 
+    async def history_topics(self, db, identifiers):
+        if not identifiers:
+            return {}, {}
+        ranked = (
+            select(MessageRecord.session_id, MessageRecord.id, MessageRecord.content_jsonb,
+                   func.row_number().over(
+                       partition_by=MessageRecord.session_id, order_by=MessageRecord.sequence_no,
+                   ).label("position"))
+            .where(MessageRecord.session_id.in_(identifiers), MessageRecord.kind == "text", MessageRecord.role == "user")
+            .subquery()
+        )
+        complaints, topics = {}, {}
+        early_messages = select(ranked).where(ranked.c.position <= 3).order_by(ranked.c.position)
+        for row in await db.execute(early_messages):
+            if row.session_id in complaints:
+                continue
+            text = self.content(row)["text"]
+            if instruction_attack(text):
+                continue
+            complaint = complaint_title(text)
+            if complaint:
+                complaints[row.session_id] = complaint
+                continue
+            text = normalized(text).replace("ё", "е")
+            topic = next((title for title, pattern in CHAT_TOPICS if re.search(pattern, text)), None)
+            if topic:
+                topics.setdefault(row.session_id, topic)
+        return complaints, topics
+
+    async def survey_history_titles(self, db, identifiers):
+        if not identifiers:
+            return {}
+        answers = {}
+        rows = await db.scalars(select(AnswerRecord).where(
+            AnswerRecord.session_id.in_(identifiers),
+            AnswerRecord.question_key.in_(["primary_complaint", "symptom_details"]),
+        ))
+        for row in rows:
+            answers.setdefault(row.session_id, {})[row.question_key] = self.cipher.decrypt(
+                row.value_jsonb, answer_context(row.session_id, row.question_key),
+            )
+        titles = {}
+        for identifier, survey in answers.items():
+            complaint = survey.get("primary_complaint", {})
+            details = survey.get("symptom_details", {})
+            titles[identifier] = (
+                complaint_title(complaint.get("text", ""))
+                or complaint_title(details.get("additional_text", ""))
+                or complaint_title("", category=complaint.get("category"), location=details.get("location", ""))
+            )
+        return titles
+
     async def history(self, owner, limit, boundary):
+        has_user_message = select(MessageRecord.id).where(
+            MessageRecord.session_id == SessionRecord.id,
+            MessageRecord.kind == "text",
+            MessageRecord.role == "user",
+        ).exists()
         latest = (
             select(MessageRecord.id, MessageRecord.content_jsonb,
                    func.max(MessageRecord.created_at).over().label("activity"))
@@ -71,28 +136,45 @@ class ChatService:
             .limit(1)
             .lateral()
         )
+        activity = func.greatest(
+            SessionRecord.created_at,
+            case((has_user_message, latest.c.activity)),
+            TriageResultRecord.updated_at,
+        )
         query = (
             select(SessionRecord.id, SessionRecord.kind, SessionRecord.created_at,
-                   SessionRecord.expires_at, latest.c.activity,
+                   SessionRecord.expires_at, activity.label("activity"), has_user_message.label("has_chat"),
                    latest.c.id.label("message_id"), latest.c.content_jsonb)
-            .join(latest, true())
+            .select_from(SessionRecord)
+            .outerjoin(TriageResultRecord, (
+                (TriageResultRecord.session_id == SessionRecord.id) & (SessionRecord.kind == "questionnaire")
+            ))
+            .outerjoin(latest, true())
             .where(SessionRecord.owner_id == owner, SessionRecord.expires_at > func.now(),
-                   SessionRecord.status == SurveyStatus.COMPLETED)
-            .order_by(latest.c.activity.desc(), SessionRecord.id.desc())
+                   SessionRecord.status == SurveyStatus.COMPLETED,
+                   or_(has_user_message, TriageResultRecord.session_id.is_not(None)))
+            .order_by(activity.desc(), SessionRecord.id.desc())
             .limit(limit + 1)
         )
         if boundary is not None:
-            query = query.where(tuple_(latest.c.activity, SessionRecord.id) < boundary)
+            query = query.where(tuple_(activity, SessionRecord.id) < boundary)
         async with self.transaction() as db:
             rows = (await db.execute(query)).all()
+            page = rows[:limit]
+            complaints, topics = await self.history_topics(db, [row.id for row in page if row.has_chat])
+            surveys = await self.survey_history_titles(db, [row.id for row in page if row.kind == "questionnaire"])
             items = []
-            for row in rows[:limit]:
-                value = self.cipher.decrypt(row.content_jsonb, message_context(row.id, row.message_id))
-                date = row.created_at.astimezone(UTC)
+            for row in page:
+                kind = row.kind if row.has_chat else "questionnaire_result"
+                emergency = False
+                if row.has_chat:
+                    value = self.cipher.decrypt(row.content_jsonb, message_context(row.id, row.message_id))
+                    emergency = value.get("emergency", False)
                 items.append(ChatSummary(
-                    id=row.id, kind=row.kind, title=f"Чат от {date.day} {MONTHS[date.month - 1]}",
+                    id=row.id, kind=kind,
+                    title=complaints.get(row.id) or surveys.get(row.id) or topics.get(row.id) or "Тема не указана",
                     created_at=row.created_at, last_activity_at=row.activity, expires_at=row.expires_at,
-                    emergency=value.get("emergency", False),
+                    emergency=emergency,
                 ))
             cursor = None
             if len(rows) > limit:

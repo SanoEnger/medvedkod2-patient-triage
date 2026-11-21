@@ -22,7 +22,7 @@ test('chat survives reload through HTTPS and can be removed from history', async
     await expect(page.getByRole('heading', { name: 'Чат с МедВедом' })).toBeVisible()
     await expect(page.getByLabel('Ваше сообщение')).toBeEnabled()
     const replyPromise = page.waitForResponse((response) => response.url().includes('/messages') && response.request().method() === 'POST')
-    const text = '<img src="synthetic.png" alt="synthetic-chat-image"> Синтетический вопрос для врача.'
+    const text = '<img src="synthetic.png" alt="synthetic-chat-image"> Болит правое колено.'
     await page.getByLabel('Ваше сообщение').fill(text)
     await page.getByRole('button', { name: 'Отправить', exact: true }).click()
     const response = await replyPromise
@@ -42,8 +42,9 @@ test('chat survives reload through HTTPS and can be removed from history', async
     const list = await listPromise
     expect(list.headers()['cache-control']).toBe('no-store')
     const saved = (await list.json()).items.find((item: { id: string }) => item.id === chatId)
-    expect(saved).toMatchObject({ id: chatId, kind: 'chat', emergency: false })
-    const entry = page.getByRole('listitem').filter({ has: page.getByRole('heading', { name: saved.title, exact: true }) }).first()
+    expect(saved).toMatchObject({ id: chatId, kind: 'chat', title: 'Боль в колене', emergency: false })
+    const entry = page.getByRole('listitem').filter({ has: page.getByRole('heading', { name: 'Боль в колене', exact: true }) }).first()
+    await expect(entry.getByText(/^Чат с МедВедом ·/)).toBeVisible()
     const getPromise = page.waitForResponse((value) => value.url() === `${apiOrigin}/api/v1/chats/${chatId}` && value.request().method() === 'GET')
     await entry.getByRole('button', { name: /^Открыть:/ }).click()
     expect(await (await getPromise).json()).toEqual(conversation)

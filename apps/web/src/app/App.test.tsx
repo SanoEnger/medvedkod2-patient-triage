@@ -53,7 +53,19 @@ test('survey remains mounted on home, blocks chat, then hands its result to MedV
   await user.click(screen.getByRole('button', { name: 'Продолжить' }))
   await user.click(screen.getByRole('button', { name: 'Сохранить ответы и посмотреть итог' }))
   expect(screen.getByRole('heading', { name: 'Результат опроса' })).toBeVisible()
-  await user.click(screen.getByRole('button', { name: 'Уточнить у МедВеда' }))
+  const chatButton = screen.getByRole('button', { name: 'Уточнить у МедВеда' })
+  const chatHint = 'Чтобы уточнить результат у МедВеда, завершите опрос.'
+  expect(chatButton).toBeVisible()
+  expect(chatButton).toHaveAttribute('aria-disabled', 'true')
+  expect(screen.queryByText(chatHint)).not.toBeInTheDocument()
+  await user.click(chatButton)
+  expect(screen.getByText(chatHint)).toBeVisible()
+  expect(open).not.toHaveBeenCalled()
+  expect(screen.getByRole('button', { name: 'Завершить опрос' })).toBeVisible()
+  await user.click(screen.getByRole('button', { name: 'Завершить опрос' }))
+  await waitFor(() => expect(chatButton).not.toHaveAttribute('aria-disabled'))
+  expect(screen.queryByText(chatHint)).not.toBeInTheDocument()
+  await user.click(chatButton)
   await screen.findByRole('heading', { name: 'Чат с МедВедом' })
   await screen.findByText('Готов обсудить ваш результат.')
   expect(open).toHaveBeenCalledWith(current!.id, expect.any(AbortSignal))
@@ -65,7 +77,7 @@ test('history opens with an active survey, and changing MAX identity clears the 
   const activeSurvey = await base.create()
   const id = crypto.randomUUID()
   const date = new Date().toISOString()
-  const saved: ChatSummary = { id, kind: 'chat', title: 'Чат от 21 ноября', created_at: date,
+  const saved: ChatSummary = { id, kind: 'chat', title: 'Боль в груди', created_at: date,
     last_activity_at: date, expires_at: date, emergency: true }
   const open = vi.fn()
   const list = vi.fn<MedvedClient['chat']['list']>()
@@ -90,7 +102,9 @@ test('history opens with an active survey, and changing MAX identity clears the 
   await user.click(await screen.findByRole('button', { name: 'Повторить загрузку' }))
   await user.click(await screen.findByRole('button', { name: 'Показать ещё' }))
   expect(list).toHaveBeenLastCalledWith('next-page', expect.any(AbortSignal))
-  await user.click(await screen.findByRole('button', { name: /^Открыть: Чат от/ }))
+  expect(await screen.findByRole('heading', { name: 'Боль в груди' })).toBeVisible()
+  expect(screen.getByText(/^Чат с МедВедом ·/)).toBeVisible()
+  await user.click(screen.getByRole('button', { name: /^Открыть: Боль в груди, Чат с МедВедом/ }))
   expect(await screen.findByText('Синтетическая переписка владельца')).toBeVisible()
   expect(screen.queryByLabelText('Ваше сообщение')).toBeNull()
   expect(screen.getByRole('link', { name: 'Позвонить 112' })).toHaveAttribute('href', 'tel:112')
@@ -98,6 +112,35 @@ test('history opens with an active survey, and changing MAX identity clears the 
   expect(get).toHaveBeenCalledWith(id, expect.any(AbortSignal))
   rerender(<App hostAdapter={second} />)
   await user.click(await screen.findByRole('button', { name: 'История чатов' }))
-  expect(await screen.findByText('Сохранённых чатов пока нет.')).toBeVisible()
+  expect(await screen.findByText('Сохранённых чатов и результатов пока нет.')).toBeVisible()
   expect(screen.queryByText('Синтетическая переписка владельца')).toBeNull()
+})
+
+test('history opens a completed result without creating its chat', async () => {
+  const base = createMockClient('unknown')
+  const survey = await base.create()
+  const result = { ...await base.triage(survey.id), rationale: 'Сохранённое обоснование результата' }
+  const date = new Date().toISOString()
+  const saved: ChatSummary = { id: survey.id, kind: 'questionnaire_result', title: 'Боль в колене',
+    created_at: date, last_activity_at: date, expires_at: survey.expires_at, emergency: false }
+  const get = vi.fn(async (): Promise<Survey> => ({ ...survey, status: 'COMPLETED', state: 'COMPLETED', result }))
+  const open = vi.fn()
+  const getChat = vi.fn()
+  vi.spyOn(api, 'createApiClient').mockReturnValue({
+    ...base, get,
+    chat: { list: async () => ({ items: [saved], next_cursor: null }), open, get: getChat, send: vi.fn(),
+      delete: vi.fn(), availability: async () => ({ active_survey: null }) },
+  })
+  render(<App hostAdapter={{ initialize: async () => ({ mode: 'demo' }) }} />)
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('button', { name: 'История чатов' }))
+  expect(await screen.findByRole('heading', { name: 'Боль в колене' })).toBeVisible()
+  expect(screen.getByText(/^Результат опроса ·/)).toBeVisible()
+  await user.click(screen.getByRole('button', { name: /^Открыть: Боль в колене, Результат опроса/ }))
+  expect(await screen.findByText(result.rationale)).toBeVisible()
+  expect(get).toHaveBeenCalledWith(survey.id, expect.any(AbortSignal))
+  expect(open).not.toHaveBeenCalled()
+  expect(getChat).not.toHaveBeenCalled()
+  await user.click(screen.getByRole('button', { name: 'К истории' }))
+  expect(await screen.findByRole('heading', { name: 'История чатов' })).toBeVisible()
 })
