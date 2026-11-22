@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from app.integrations.chat_agent import AgentReply
+from app.integrations.chat_agent import SurveyAnalysis
 from app.integrations.groq.exceptions import GroqTimeout
 from app.schemas.survey import AnswerRequest, RedFlags
 from app.services.sessions import SessionService
@@ -15,11 +15,11 @@ class Analyst:
         self.calls = []
         self.fail = fail
 
-    async def reply(self, history, context):
-        self.calls.append(context)
+    async def analyze(self, answers):
+        self.calls.append(answers)
         if self.fail:
             raise GroqTimeout()
-        return AgentReply(text="Указан кашель два дня. Уточните изменение симптомов.", emergency=False)
+        return SurveyAnalysis(specialty="Терапевт", rationale="Первичное обращение по поводу кашля.", text="Указан кашель два дня. Уточните изменение симптомов.", needs_clarification=False)
 
 
 async def completed(service):
@@ -41,10 +41,10 @@ def test_analysis_uses_whole_survey_and_preserves_rules_and_cached_result():
         service = SessionService(analyst=analyst)
         identifier = await completed(service)
         result = await service.triage(identifier, 'owner')
-        assert result.urgency == 'UNKNOWN' and result.specialty is None
+        assert result.urgency == 'UNKNOWN' and result.specialty == 'Терапевт'
         assert result.analysis_source == 'groq' and 'кашель' in result.analysis
-        assert analyst.calls[0]['answers']['medical_history']['allergies'] == ['Синтетический пример']
-        assert len(analyst.calls[0]['answers']) == 5
+        assert analyst.calls[0]['medical_history']['allergies'] == ['Синтетический пример']
+        assert len(analyst.calls[0]) == 5
         assert (await service.get(identifier, 'owner')).result['analysis'] == result.analysis
         assert await service.triage(identifier, 'owner') == result
         assert len(analyst.calls) == 1
@@ -80,10 +80,10 @@ def test_late_analysis_cannot_restore_edited_or_deleted_survey(action):
     async def run():
         entered, release = asyncio.Event(), asyncio.Event()
         class Slow(Analyst):
-            async def reply(self, history, context):
+            async def analyze(self, answers):
                 entered.set()
                 await release.wait()
-                return await super().reply(history, context)
+                return await super().analyze(answers)
         service = SessionService(analyst=Slow())
         identifier = await completed(service)
         pending = asyncio.create_task(service.triage(identifier, 'owner'))

@@ -8,6 +8,35 @@ from app.integrations.groq.client import GroqClient, GroqSettings
 from app.integrations.groq.exceptions import GroqError
 
 
+def test_survey_specialist_comes_from_model_without_precomputed_result():
+    async def handler(request):
+        body = json.loads(request.content)
+        data = json.loads(body['messages'][1]['content'])
+        assert set(data) == {'answers', 'answer_status'}
+        assert data['answers']['primary_complaint']['text'] == 'Синтетическая жалоба'
+        return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {
+            'content': json.dumps({'specialty': 'Невролог', 'rationale': 'Для оценки указанных жалоб.',
+                'text': 'Разбор сведений анкеты.', 'needs_clarification': False}),
+        }}]})
+    client = GroqClient(GroqSettings(api_key='synthetic-key', model='test-model'), transport=httpx.MockTransport(handler))
+    result = asyncio.run(ChatAgent(client).analyze({'primary_complaint': {'text': 'Синтетическая жалоба'}}))
+    assert result.specialty == 'Невролог'
+
+
+@pytest.mark.parametrize('overrides', [
+    {'specialty': 'Выдуманный специалист'}, {'urgency': 'SELF_CARE'},
+    {'text': 'Принимайте препарат 100 мг'}, {'rationale': '<script>alert(1)</script>'},
+])
+def test_survey_analysis_rejects_invalid_or_unsafe_model_fields(overrides):
+    async def handler(request):
+        value = {'specialty': 'Терапевт', 'rationale': 'Первичное обращение.',
+                 'text': 'Сведения анкеты.', 'needs_clarification': False, **overrides}
+        return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps(value)}}]})
+    client = GroqClient(GroqSettings(api_key='synthetic-key', model='test-model'), transport=httpx.MockTransport(handler))
+    with pytest.raises(GroqError):
+        asyncio.run(ChatAgent(client).analyze({}))
+
+
 def test_answer_status_distinguishes_negatives_unknowns_and_zero():
     assert answer_status({
         "red_flags": {"chest_pain": False, "bleeding": None, "seizure": True},

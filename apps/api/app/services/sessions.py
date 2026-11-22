@@ -270,18 +270,15 @@ class SessionService:
             if survey.status != SurveyStatus.COMPLETED or survey.rule_codes or self._analyst is None:
                 return result
             revision = survey.revision
-            context = {"answers": json.loads(json.dumps(survey.answers)), "result": result.model_dump()}
-        # The provider must not hold database locks or rewrite medical routing.
+            answers = json.loads(json.dumps(survey.answers))
+        # The provider proposes a specialty from answers, never from the rule result.
         event("survey.analysis_started", mode=self._analysis_source)
         try:
-            reply = await self._analyst.reply([{"role": "user", "content": (
-                "Составь разбор завершённой анкеты: кратко обобщи указанные жалобы, их длительность, "
-                "выраженность и важные сведения анамнеза. Укажи, каких данных не хватает, и вопросы врачу. "
-                "Используй только факты из анкеты, отличай неизвестное от отрицательного ответа. "
-                "Не ставь диагноз, не назначай лечение, не меняй срочность и маршрут из результата. "
-                "При UNKNOWN поясни, что срочность не определена и требуется оценка специалиста."
-            )}], context)
+            reply = await self._analyst.analyze(answers)
             result.analysis = reply.text
+            result.specialty = reply.specialty
+            result.rationale = reply.rationale
+            result.needs_clarification = reply.needs_clarification or result.urgency == "UNKNOWN"
             result.analysis_source = self._analysis_source
             event("survey.analysis_completed", mode=self._analysis_source)
         except GroqError as error:
