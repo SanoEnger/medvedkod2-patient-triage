@@ -68,7 +68,7 @@ for (const width of [320, 360, 390]) for (const scale of [1, 2]) {
     await page.getByRole('button', { name: 'Продолжить' }).click()
     await noOverflow(page)
     await page.getByLabel('Госпитализации за последний год', { exact: true }).fill('Synthetic admission')
-    await page.getByRole('button', { name: 'Сохранить ответы и посмотреть итог' }).click()
+    await page.getByRole('button', { name: 'Завершить опрос и посмотреть итог' }).click()
     await expect(page.getByRole('heading', { name: 'Результат опроса' })).toBeVisible()
     await noOverflow(page)
     await page.getByRole('button', { name: 'Удалить обращение' }).click()

@@ -126,8 +126,7 @@ export function QuestionnairePage({ client, onHome, onChat, initialSurvey, activ
           </Card> : <div className="result-layout">
             <h1 ref={heading} tabIndex={-1}>Результат опроса</h1>
             {flow.survey.result ? <ResultCard result={flow.survey.result} /> : <Card><p>Итог ещё не получен.</p></Card>}
-            {flow.survey.status === 'REVIEWING' && <p className="notice">Для разбора всей анкеты МедВедом нажмите «Завершить опрос». Перед завершением можно уточнить ответы.</p>}
-            {finished && <p className="form-feedback" role="status">Ответы сохранены. Можно вернуться на главную или начать новый опрос.</p>}
+            {(finished || surveyCompleted) && <p className="form-feedback" role="status">Ответы сохранены. Можно вернуться на главную или начать новый опрос.</p>}
             <div className="form-actions">
               {!finished && flow.survey.status !== 'COMPLETED' && <Button icon="check" disabled={flow.busy} onClick={async () => { if (await flow.triage()) setFinished(true) }}>{flow.survey.result ? 'Завершить опрос' : 'Получить результат'}</Button>}
               {onChat && flow.survey.result && <Button icon="chat" variant={surveyCompleted ? 'primary' : 'secondary'}
@@ -153,7 +152,7 @@ export function QuestionnairePage({ client, onHome, onChat, initialSurvey, activ
           </div>}
       </>}
     </>}
-    {flow.busy && <p className="survey-loading" role="status">Сохраняем и проверяем сведения…</p>}
+    {flow.busy && <p className="survey-loading" role="status">{question === 'medical_history' ? 'Формируем итог и разбор МедВеда…' : 'Сохраняем и проверяем сведения…'}</p>}
     {flow.survey && <Button className="delete-action" variant="secondary" disabled={flow.busy} onClick={() => setConfirmDelete(true)}>Удалить обращение</Button>}
     <dialog className="delete-dialog" ref={dialog} aria-labelledby="delete-title" onCancel={() => setConfirmDelete(false)} onClose={() => setConfirmDelete(false)}>
       <h2 id="delete-title">Удалить это обращение?</h2>

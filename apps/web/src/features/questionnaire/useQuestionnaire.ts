@@ -85,7 +85,15 @@ export function useQuestionnaire(client: SurveyClient, initial?: Survey | null) 
     if (!current.current || stopped.current) return Promise.resolve(false)
     const id = current.current.id
     const snapshot = structuredClone({ ...body, idempotency_key: crypto.randomUUID() }) as AnswerRequest
-    return run({ kind: 'answer', execute: (signal) => client.answer(id, snapshot, signal) })
+    return run({ kind: 'answer', async execute(signal, update) {
+      const accepted = await client.answer(id, snapshot, signal)
+      if (snapshot.question_key !== 'medical_history' || isEmergency(accepted)) return accepted
+      // Do not render the preliminary rule result while the final card is loading.
+      const result = await client.triage(id, signal)
+      const completed = await client.get(id, signal)
+      update({ ...completed, result, urgency: result.urgency })
+      return undefined
+    } })
   }
   function back(target: number) {
     if (!current.current || stopped.current) return Promise.resolve(false)

@@ -82,6 +82,6 @@ export async function complete(page: Page) {
   await page.getByRole('button', { name: 'Ничего из перечисленного' }).click()
   await page.getByRole('button', { name: 'Продолжить' }).click()
   await page.getByLabel('Госпитализации за последний год', { exact: true }).fill('Synthetic admission')
-  await page.getByRole('button', { name: 'Сохранить ответы и посмотреть итог' }).click()
+  await page.getByRole('button', { name: 'Завершить опрос и посмотреть итог' }).click()
   await expect(page.getByRole('heading', { name: 'Результат опроса' })).toBeVisible()
 }

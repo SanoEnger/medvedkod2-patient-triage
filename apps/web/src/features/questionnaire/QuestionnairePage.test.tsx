@@ -33,7 +33,7 @@ async function complete(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: 'Ничего из перечисленного' }))
   await user.click(screen.getByRole('button', { name: 'Продолжить' }))
   await user.type(screen.getByLabelText('Госпитализации за последний год'), 'Синтетический пример')
-  await user.click(screen.getByRole('button', { name: 'Сохранить ответы и посмотреть итог' }))
+  await user.click(screen.getByRole('button', { name: 'Завершить опрос и посмотреть итог' }))
   await screen.findByRole('heading', { name: 'Результат опроса' })
 }
 
@@ -69,7 +69,7 @@ describe('questionnaire UI', () => {
     expect(screen.getByText('Дерматолог')).toBeVisible()
     expect(send).toHaveBeenCalledTimes(5)
     expect(send.mock.calls[4][1].value).toMatchObject({ hospitalizations_last_year: ['Синтетический пример'] })
-    await user.click(screen.getByRole('button', { name: 'Завершить опрос' }))
+    expect(screen.queryByRole('button', { name: 'Завершить опрос' })).not.toBeInTheDocument()
     await screen.findByText(/Ответы сохранены/)
     await user.click(screen.getByRole('button', { name: 'Начать новый опрос' }))
     expect(screen.getByRole('checkbox', { name: /Я понимаю/ })).not.toBeChecked()
@@ -191,10 +191,10 @@ describe('questionnaire UI', () => {
 
   test('server text is displayed as text, not HTML', async () => {
     const client = createMockClient()
-    const get = client.answer
-    vi.spyOn(client, 'answer').mockImplementation(async (...args) => {
+    const get = client.triage
+    vi.spyOn(client, 'triage').mockImplementation(async (...args) => {
       const value = await get(...args)
-      return value.result ? { ...value, result: { ...value.result, rationale: '<img src=x onerror=alert(1)>' } } : value
+      return { ...value, rationale: '<img src=x onerror=alert(1)>' }
     })
     const { user } = mount(client)
     await complete(user)
@@ -209,6 +209,30 @@ describe('questionnaire UI', () => {
     await user.click(screen.getByRole('button', { name: 'Продолжить' }))
     expect(screen.getByLabelText('Возраст в полных годах')).toBeInvalid()
   })
+})
+
+test('last answer waits for the complete model result and retries without resubmitting a new answer', async () => {
+  const client = createMockClient()
+  const send = vi.spyOn(client, 'answer')
+  const finalize = client.triage
+  vi.spyOn(client, 'triage').mockRejectedValueOnce(new ApiError(503)).mockImplementation(finalize)
+  const { result } = renderHook(() => useQuestionnaire(client))
+  await act(async () => { await result.current.start() })
+  const steps = [
+    { question_key: 'primary_complaint', value: { category: 'skin', text: '' } },
+    { question_key: 'patient_context', value: { age_years: 30 } },
+    { question_key: 'symptom_details', value: { duration: '1 день', severity_0_10: 2 } },
+    { question_key: 'red_flags', value: {} },
+  ] as Parameters<typeof result.current.answer>[0][]
+  for (const step of steps) await act(async () => { await result.current.answer(step) })
+  await act(async () => { await result.current.answer({ question_key: 'medical_history', value: {} as never }) })
+  // A failed finalization must not expose the preliminary result as a finished card.
+  expect(result.current.survey?.current_question).toBe('medical_history')
+  expect(result.current.survey?.result).toBeNull()
+  await act(async () => { await result.current.retry() })
+  expect(result.current.survey?.status).toBe('COMPLETED')
+  expect(result.current.survey?.result?.specialty).toBe('Дерматолог')
+  expect(send.mock.calls[4][1]).toEqual(send.mock.calls[5][1])
 })
 
 test('a normal late response cannot hide an emergency in the same session', async () => {
