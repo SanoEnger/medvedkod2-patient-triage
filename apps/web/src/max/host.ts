@@ -1,8 +1,15 @@
 import type { HostContext, MaxHostAdapter } from './MaxHostAdapter'
 
 let session: { accessToken: string; expiresAt: number } | undefined
+let launchSequence = 0
 export function getAppSession() {
   return session && session.expiresAt > Date.now() ? session : undefined
+}
+
+export function clearAppSession(accessToken: string) {
+  if (session?.accessToken !== accessToken) return false
+  session = undefined
+  return true
 }
 
 export function createHostAdapter(): MaxHostAdapter | undefined {
@@ -17,8 +24,10 @@ export function createHostAdapter(): MaxHostAdapter | undefined {
     kind: 'host',
     initialize() {
       pending ??= (async (): Promise<HostContext> => {
+        const sequence = ++launchSequence
         const credential = token
         token = undefined
+        session = undefined
         if (!credential || credential.length > 6000) throw new Error('HOST_LAUNCH_INVALID')
         const endpoint = new URL('/api/v1/auth/launch', import.meta.env.VITE_API_ORIGIN || window.location.origin)
         if (endpoint.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(endpoint.hostname)) {
@@ -42,6 +51,7 @@ export function createHostAdapter(): MaxHostAdapter | undefined {
           || !Number.isFinite(data.expires_in) || data.expires_in <= 0) {
           throw new Error('HOST_AUTH_INVALID_RESPONSE')
         }
+        if (sequence !== launchSequence) throw new Error('HOST_LAUNCH_REPLACED')
         session = { accessToken: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 }
         return { mode: 'max' }
       })()

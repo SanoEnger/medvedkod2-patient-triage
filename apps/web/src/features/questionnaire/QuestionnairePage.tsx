@@ -10,7 +10,7 @@ import { useQuestionnaire } from './useQuestionnaire'
 const urgencyLabels: Record<Triage['urgency'], string> = {
   EMERGENCY: 'Экстренно', WITHIN_24H: 'В течение 24 часов', PLANNED: 'Планово', SELF_CARE: 'Самопомощь', UNKNOWN: 'Нужно уточнение',
 }
-function ResultCard({ result }: { result: Triage }) {
+export function ResultCard({ result }: { result: Triage }) {
   return <Card className="result-card">
     <p className="urgency-label">{urgencyLabels[result.urgency]}</p>
     <h2>Куда обратиться</h2>
@@ -43,10 +43,12 @@ export function QuestionnairePage({ client, onHome, onChat, initialSurvey, activ
   const [accepted, setAccepted] = useState(!!initialSurvey)
   const [editing, setEditing] = useState(false)
   const [finished, setFinished] = useState(false)
+  const [chatHintFor, setChatHintFor] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const dialog = useRef<HTMLDialogElement>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   const question = flow.survey?.current_question
+  const surveyCompleted = flow.survey?.status === 'COMPLETED'
   const unavailable = flow.survey && flow.error && [401, 403, 404].includes(flow.error.status)
   const screen = flow.emergency ? 'emergency' : unavailable ? 'unavailable' : question || (flow.survey ? 'result' : 'consent')
   useEffect(() => {
@@ -122,19 +124,23 @@ export function QuestionnairePage({ client, onHome, onChat, initialSurvey, activ
             {finished && <p className="form-feedback" role="status">Ответы сохранены. Можно вернуться на главную или начать новый опрос.</p>}
             <div className="form-actions">
               {!finished && flow.survey.status !== 'COMPLETED' && <Button icon="check" disabled={flow.busy} onClick={async () => { if (await flow.triage()) setFinished(true) }}>{flow.survey.result ? 'Завершить опрос' : 'Получить результат'}</Button>}
-              {onChat && flow.survey.result && <Button icon="chat" disabled={flow.busy} onClick={async () => {
-                const id = flow.survey!.id
-                if (flow.survey!.status === 'COMPLETED' || await flow.triage()) onChat(id)
-              }}>Уточнить у МедВеда</Button>}
+              {onChat && flow.survey.result && <Button icon="chat" variant={surveyCompleted ? 'primary' : 'secondary'}
+                disabled={flow.busy} aria-disabled={surveyCompleted ? undefined : true} onClick={() => {
+                  const id = flow.survey!.id
+                  if (surveyCompleted) onChat(id)
+                  else setChatHintFor(id)
+                }}>Уточнить у МедВеда</Button>}
               <Button icon="edit" variant="secondary" disabled={flow.busy} onClick={() => setEditing((value) => !value)}>Уточнить ответы</Button>
               <Button icon="restart" variant="secondary" disabled={flow.busy} onClick={async () => {
                 if (flow.survey!.status !== 'REVIEWING' || await flow.triage()) reset()
               }}>Начать новый опрос</Button>
             </div>
+            {!surveyCompleted && chatHintFor === flow.survey.id &&
+              <p className="field-hint" role="status">Чтобы уточнить результат у МедВеда, завершите опрос.</p>}
             {editing && <Card><h2>К какому шагу вернуться?</h2><p className="question-note">После возврата следующие ответы нужно подтвердить заново. Прежний результат будет сброшен.</p>
               <div className="edit-steps">{QUESTIONS.slice(0, flow.survey.progress.answered).map((key, index) =>
                 <Button key={key} icon="edit" variant="secondary" disabled={flow.busy} onClick={async () => {
-                  if (await flow.back(index)) { setEditing(false); setFinished(false) }
+                  if (await flow.back(index)) { setEditing(false); setFinished(false); setChatHintFor(null) }
                 }}>{index + 1}. {titles[key]}</Button>)}</div>
             </Card>}
             {error}

@@ -1,18 +1,25 @@
-import { getAppSession } from '../max/host'
+import { clearAppSession, getAppSession } from '../max/host'
 import { QUESTIONS } from './contracts'
 import type { Survey, SurveyClient, Triage } from './contracts'
-import type { ChatClient, Conversation } from './chat'
+import type { ChatClient, ChatHistory, Conversation } from './chat'
 
 export interface MedvedClient extends SurveyClient { chat: ChatClient }
 
 export class ApiError extends Error {
-  constructor(public readonly status = 0, public readonly emergency = false, public readonly invalidResponse = false) {
+  constructor(public readonly status = 0, public readonly emergency = false, public readonly invalidResponse = false,
+    public readonly code?: string) {
     super('SURVEY_API_ERROR')
   }
 }
+const chatErrorCodes = new Set([
+  'questionnaire_in_progress', 'questionnaire_not_completed', 'chat_reply_pending', 'chat_turn_pending',
+  'chat_emergency_stop', 'chat_message_limit', 'idempotency_conflict', 'questionnaire_changed',
+])
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every((entry) => typeof entry === 'string')
 const nullableText = (value: unknown) => value === null || typeof value === 'string'
+const uuid = (value: unknown) => typeof value === 'string' && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(value)
+const date = (value: unknown) => typeof value === 'string' && Number.isFinite(Date.parse(value))
 const urgency = ['EMERGENCY', 'WITHIN_24H', 'PLANNED', 'SELF_CARE', 'UNKNOWN']
 const statuses = ['COLLECTING', 'REVIEWING', 'COMPLETED', 'EMERGENCY_STOP', 'EXPIRED']
 export function emergencyHint(value: unknown): boolean {
@@ -50,7 +57,6 @@ export function parseSurvey(value: unknown): Survey {
   return value as unknown as Survey
 }
 export function parseChat(value: unknown): Conversation {
-  const uuid = (entry: unknown) => typeof entry === 'string' && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(entry)
   if (!object(value) || !uuid(value.id) || !(value.questionnaire_id === null || uuid(value.questionnaire_id))
     || typeof value.emergency !== 'boolean' || typeof value.pending !== 'boolean' || typeof value.retryable !== 'boolean'
     || !Array.isArray(value.messages) || value.messages.length > 201
@@ -63,6 +69,16 @@ export function parseChat(value: unknown): Conversation {
   if (value.result !== null) parseTriage(value.result)
   return value as unknown as Conversation
 }
+function parseChatHistory(value: unknown): ChatHistory {
+  if (!object(value) || !nullableText(value.next_cursor) || !Array.isArray(value.items) || value.items.length > 20
+    || value.items.some((entry) => !object(entry) || !uuid(entry.id) || !['chat', 'questionnaire', 'questionnaire_result'].includes(String(entry.kind))
+      || typeof entry.title !== 'string' || typeof entry.emergency !== 'boolean'
+      || !date(entry.created_at) || !date(entry.last_activity_at) || !date(entry.expires_at))) {
+    throw new ApiError(0, false, true)
+  }
+  return value as unknown as ChatHistory
+}
+
 export function apiEndpoint(path: string): URL {
   let origin: URL
   try { origin = new URL(import.meta.env.VITE_API_ORIGIN || window.location.origin) }
@@ -74,7 +90,7 @@ export function apiEndpoint(path: string): URL {
   return new URL(path, origin.origin)
 }
 
-export function createApiClient(mode: 'demo' | 'max'): MedvedClient {
+export function createApiClient(mode: 'demo' | 'max', onAuthorizationExpired?: () => void): MedvedClient {
   let demoSession: { accessToken: string; expiresAt: number } | undefined
   let authorization: Promise<string> | undefined
   async function request(path: string, method: string, body?: unknown, signal?: AbortSignal, token?: string): Promise<unknown> {
@@ -88,18 +104,23 @@ export function createApiClient(mode: 'demo' | 'max'): MedvedClient {
       })
     } catch (error) { if (error instanceof ApiError) throw error; throw new ApiError() }
     if (method === 'DELETE' && response.status === 204) return undefined
+    if (response.status === 401 && mode === 'demo') demoSession = undefined
+    if (response.status === 401 && mode === 'max' && token && clearAppSession(token)) onAuthorizationExpired?.()
     let value: unknown
     try { value = await response.json() } catch { throw new ApiError(response.status, false, true) }
     if (!response.ok) {
-      if (response.status === 401 && mode === 'demo') demoSession = undefined
-      throw new ApiError(response.status, emergencyHint(value))
+      const code = object(value) && typeof value.detail === 'string' && chatErrorCodes.has(value.detail) ? value.detail : undefined
+      throw new ApiError(response.status, emergencyHint(value), false, code)
     }
     return value
   }
   async function token(): Promise<string> {
     if (mode === 'max') {
       const session = getAppSession()
-      if (!session) throw new ApiError(401)
+      if (!session) {
+        onAuthorizationExpired?.()
+        throw new ApiError(401)
+      }
       return session.accessToken
     }
     if (demoSession && demoSession.expiresAt > Date.now()) return demoSession.accessToken
@@ -117,6 +138,12 @@ export function createApiClient(mode: 'demo' | 'max'): MedvedClient {
   const path = (id: string) => '/api/v1/sessions/' + encodeURIComponent(id)
   return {
     chat: {
+      list: async ({ cursor, kind } = {}, signal) => {
+        const params = new URLSearchParams()
+        if (cursor) params.set('cursor', cursor)
+        if (kind) params.set('kind', kind)
+        return parseChatHistory(await call('/api/v1/chats' + (params.size ? '?' + params : ''), 'GET', undefined, signal))
+      },
       availability: async (signal) => {
         const value = await call('/api/v1/chats/availability', 'GET', undefined, signal)
         if (!object(value) || !('active_survey' in value)) throw new ApiError(0, false, true)

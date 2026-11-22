@@ -1,9 +1,12 @@
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
 from pydantic import Field, field_validator
 
 from app.schemas.survey import SessionResponse, StrictModel, TriageResponse
+
+ChatKind = Literal["chat", "questionnaire", "questionnaire_result"]
 
 
 class ChatCreate(StrictModel):
@@ -44,3 +47,22 @@ class ChatResponse(StrictModel):
 
 class ChatAvailability(StrictModel):
     active_survey: SessionResponse | None
+
+
+class ChatSummary(StrictModel):
+    id: UUID
+    kind: ChatKind
+    title: str
+    created_at: datetime
+    last_activity_at: datetime
+    expires_at: datetime
+    emergency: bool
+
+
+class ChatHistory(StrictModel):
+    items: list[ChatSummary]
+    next_cursor: str | None
+
+
+class ChatError(StrictModel):
+    detail: str

@@ -9,7 +9,9 @@ const steps = [
   ['Узнайте, куда обратиться', 'Получите ориентир по срочности и профилю врача.'],
 ]
 
-export function WelcomePage({ onStart, onChat, surveyInProgress = false, chatBlocked = false }: { onStart: () => void; onChat?: () => void; surveyInProgress?: boolean; chatBlocked?: boolean }) {
+export function WelcomePage({ onStart, onChat, onHistory, surveyInProgress = false, chatBlocked = false }: {
+  onStart: () => void; onChat?: () => void; onHistory?: () => void; surveyInProgress?: boolean; chatBlocked?: boolean
+}) {
   return <div className="welcome-layout">
     <div className="intro">
       <h1 tabIndex={-1}>Привет, я МедВед</h1>
@@ -24,6 +26,7 @@ export function WelcomePage({ onStart, onChat, surveyInProgress = false, chatBlo
         <Button icon="clipboard" className="wide" onClick={onStart}>{surveyInProgress ? 'Продолжить опрос' : 'Начать опрос'}</Button>
         {onChat && <Button icon="chat" variant="secondary" className="wide chat-start" disabled={chatBlocked} onClick={onChat}>Начать чат с МедВедом</Button>}
         {surveyInProgress && <p className="field-hint chat-start-hint">Чат станет доступен после завершения или удаления опроса.</p>}
+        {onHistory && <Button icon="chat" variant="secondary" className="wide chat-start" onClick={onHistory}>История чатов</Button>}
         <p className="survey-note">Пять шагов — от жалобы до результата.</p>
       </Card>
       <Card className="privacy-note"><Icon name="shield" className="privacy-symbol" /><div><h2>Без личных данных</h2><p>Для опроса не нужны имя, телефон или медицинские документы.</p></div></Card>
