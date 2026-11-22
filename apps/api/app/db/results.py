@@ -34,6 +34,8 @@ def encode_result(
             {
                 "disclaimer": value["disclaimer"],
                 "needs_clarification": value["needs_clarification"],
+                "analysis": value["analysis"],
+                "analysis_source": value["analysis_source"],
             },
             triage_context(session_id, "details_jsonb"),
         ),

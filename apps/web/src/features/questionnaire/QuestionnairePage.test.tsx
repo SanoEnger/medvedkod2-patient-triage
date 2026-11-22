@@ -5,7 +5,7 @@ import { AppShell } from '../../app/AppShell'
 import { ApiError } from '../../api/client'
 import { createMockClient, demoResult } from '../../api/mock'
 import type { Survey, SurveyClient } from '../../api/contracts'
-import { QuestionnairePage } from './QuestionnairePage'
+import { QuestionnairePage, ResultCard } from './QuestionnairePage'
 import { useQuestionnaire } from './useQuestionnaire'
 
 function mount(client: SurveyClient = createMockClient()) {
@@ -38,6 +38,18 @@ async function complete(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('questionnaire UI', () => {
+  test('renders model analysis as text without inventing a specialist', () => {
+    render(<ResultCard result={{ ...demoResult('unknown'), specialty: null, analysis_source: 'groq', analysis: '<img src=x> Сведения анкеты.' }} />)
+    expect(screen.getByRole('heading', { name: 'Разбор анкеты МедВедом' })).toBeVisible()
+    expect(screen.getByText('<img src=x> Сведения анкеты.')).toBeVisible()
+    expect(screen.getByText('Не определён')).toBeVisible()
+    expect(document.querySelector('img')).toBeNull()
+  })
+  test('shows model failure separately from the safety result', () => {
+    render(<ResultCard result={{ ...demoResult('unknown'), analysis_source: 'unavailable' }} />)
+    expect(screen.getByRole('status')).toHaveTextContent('Разбор анкеты моделью сейчас недоступен')
+    expect(screen.getByText(demoResult('unknown').rationale)).toBeVisible()
+  })
   test('does not create a session before consent', async () => {
     const client = createMockClient()
     const create = vi.spyOn(client, 'create')
@@ -118,7 +130,7 @@ describe('questionnaire UI', () => {
     await complete(user)
     expect(screen.getByText('Нужно уточнение', { exact: true })).toBeVisible()
     const card = screen.getByRole('heading', { name: 'Куда обратиться' }).closest('section')!
-    expect(within(card).getByText('Терапевт', { exact: true })).toBeVisible()
+    expect(within(card).getByText('Не определён', { exact: true })).toBeVisible()
     expect(card.textContent?.match(/103\/112/g)).toHaveLength(1)
     expect(within(card).queryByText(/Уточните ответы/)).not.toBeInTheDocument()
     expect(screen.queryByText('Самопомощь', { exact: true })).not.toBeInTheDocument()

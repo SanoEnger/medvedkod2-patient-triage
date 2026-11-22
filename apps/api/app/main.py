@@ -58,9 +58,10 @@ def create_app(
         cipher = JsonCipher.from_file(settings.data_encryption_key_file)
         engine = create_engine(settings=settings)
         factory = async_sessionmaker(engine, expire_on_commit=False)
-        session_service = SessionService(settings.survey_ttl_seconds,
-                                        PostgresSurveyStore(factory, cipher, settings.demo_mode), extractor=extractor)
         chat_agent = ChatAgent(GroqClient(GroqSettings.from_env())) if settings.nlp_mode == "live" else MockChatAgent()
+        session_service = SessionService(settings.survey_ttl_seconds,
+                                        PostgresSurveyStore(factory, cipher, settings.demo_mode), extractor=extractor,
+                                        analyst=chat_agent, analysis_source="groq" if settings.nlp_mode == "live" else "mock")
         chat_service = chat_service or ChatService(factory, cipher, chat_agent,
             ttl_seconds=settings.survey_ttl_seconds, demo_mode=settings.demo_mode)
 

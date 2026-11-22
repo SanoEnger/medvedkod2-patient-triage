@@ -15,10 +15,15 @@ export function ResultCard({ result }: { result: Triage }) {
     <p className="urgency-label">{urgencyLabels[result.urgency]}</p>
     <h2>Куда обратиться</h2>
     <dl className="result-details">
-      <div><dt>Специалист</dt><dd>{result.specialty || 'Терапевт'}</dd></div>
+      <div><dt>Специалист</dt><dd>{result.specialty || 'Не определён'}</dd></div>
       <div><dt>Место обращения</dt><dd>{result.place || 'Нужно уточнить'}</dd></div>
       <div><dt>Обоснование</dt><dd>{result.rationale}</dd></div>
     </dl>
+    {result.analysis && <section aria-label="Разбор анкеты">
+      <h2>{result.analysis_source === 'mock' ? 'Демонстрационный разбор' : 'Разбор анкеты МедВедом'}</h2>
+      <p style={{ whiteSpace: 'pre-wrap' }}>{result.analysis}</p>
+    </section>}
+    {result.analysis_source === 'unavailable' && <p role="status">Разбор анкеты моделью сейчас недоступен. Выше показан результат правил безопасности.</p>}
     {result.needs_clarification && result.urgency !== 'UNKNOWN' && <p className="notice">Ответы требуют уточнения.</p>}
     <p className="result-disclaimer">{result.disclaimer.replace('Демонстрационный прототип', 'МедВед')}</p>
   </Card>
@@ -121,6 +126,7 @@ export function QuestionnairePage({ client, onHome, onChat, initialSurvey, activ
           </Card> : <div className="result-layout">
             <h1 ref={heading} tabIndex={-1}>Результат опроса</h1>
             {flow.survey.result ? <ResultCard result={flow.survey.result} /> : <Card><p>Итог ещё не получен.</p></Card>}
+            {flow.survey.status === 'REVIEWING' && <p className="notice">Для разбора всей анкеты МедВедом нажмите «Завершить опрос». Перед завершением можно уточнить ответы.</p>}
             {finished && <p className="form-feedback" role="status">Ответы сохранены. Можно вернуться на главную или начать новый опрос.</p>}
             <div className="form-actions">
               {!finished && flow.survey.status !== 'COMPLETED' && <Button icon="check" disabled={flow.busy} onClick={async () => { if (await flow.triage()) setFinished(true) }}>{flow.survey.result ? 'Завершить опрос' : 'Получить результат'}</Button>}

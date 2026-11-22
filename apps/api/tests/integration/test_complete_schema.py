@@ -35,6 +35,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 pytestmark = [pytest.mark.postgres, pytest.mark.asyncio]
 OWNER = "synthetic:complete-schema"
 RESULT = {
+    "analysis": None,
+    "analysis_source": None,
     "urgency": "EMERGENCY",
     "specialty": None,
     "place": "synthetic destination",
@@ -107,8 +109,9 @@ async def test_result_roundtrip_encryption_upsert_and_owner(db):
         ]
         == versions
     )
-    changed = {**RESULT, "rationale": "synthetic updated rationale"}
+    changed = {**RESULT, "rationale": "synthetic updated rationale", "analysis": "synthetic confidential analysis", "analysis_source": "groq"}
     updated = await save_triage_result(db, session.id, OWNER, changed, cipher=cipher())
+    assert "confidential analysis" not in json.dumps(updated.details_jsonb)
     assert updated.id == identifier
     assert await db.scalar(select(func.count()).select_from(TriageResultRecord)) == 1
     assert await get_triage_result(db, session.id, OWNER, cipher=cipher()) == changed
