@@ -12,10 +12,10 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app.integrations.groq import SymptomExtractor
-from app.integrations.groq.schemas import ExtractionResult
-from app.integrations.groq.exceptions import GroqError
 from app.core.observability import event
+from app.integrations.groq import SymptomExtractor
+from app.integrations.groq.exceptions import GroqError
+from app.integrations.groq.schemas import ExtractionResult
 from app.schemas.survey import (
     QUESTION_MODELS,
     QUESTIONS,

@@ -50,7 +50,7 @@ def test_answer_status_distinguishes_negatives_unknowns_and_zero():
 
 
 def test_provider_receives_all_survey_answers_and_explicit_negatives():
-    from app.schemas.survey import RedFlags, MedicalHistory
+    from app.schemas.survey import MedicalHistory, RedFlags
     answers = {
         "primary_complaint": {"category": "pain", "text": "Синтетический пример: головная боль"},
         "patient_context": {"age_years": 30, "sex": "male", "temperature_c": 36.6},

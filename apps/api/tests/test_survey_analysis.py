@@ -2,12 +2,11 @@ import asyncio
 from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException
-
 from app.integrations.chat_agent import SurveyAnalysis
 from app.integrations.groq.exceptions import GroqTimeout
 from app.schemas.survey import AnswerRequest, RedFlags
 from app.services.sessions import SessionService
+from fastapi import HTTPException
 
 
 class Analyst:

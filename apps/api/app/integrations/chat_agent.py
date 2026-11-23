@@ -1,13 +1,18 @@
 import json
-
 from typing import Literal
+
 from pydantic import Field, ValidationError
 
+from app.core.observability import event
 from app.integrations.groq.client import GroqClient
 from app.integrations.groq.exceptions import InvalidResponse
 from app.integrations.groq.schemas import StrictModel
-from app.core.observability import event
-from app.integrations.prompt_security import SAFE_REPLY, instruction_attack, scrub_data, unsafe_output
+from app.integrations.prompt_security import (
+    SAFE_REPLY,
+    instruction_attack,
+    scrub_data,
+    unsafe_output,
+)
 
 
 class AgentReply(StrictModel):

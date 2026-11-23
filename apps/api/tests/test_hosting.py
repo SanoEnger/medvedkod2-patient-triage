@@ -1,9 +1,8 @@
 import os
 
 import pytest
-from sqlalchemy.engine import make_url
-
 from app.hosting import prepare_environment
+from sqlalchemy.engine import make_url
 
 
 def test_managed_postgres_url_keeps_credentials_and_normalizes_driver(monkeypatch):

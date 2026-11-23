@@ -14,8 +14,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.api.chat_routes import router as chat_router
 from app.api.routes import router
 from app.core.config import Settings
-from app.core.observability import configure_logging, event, RequestLoggingMiddleware
 from app.core.encryption import JsonCipher
+from app.core.observability import RequestLoggingMiddleware, configure_logging, event
 from app.core.rate_limit import LocalRateLimiter
 from app.db.engine import create_engine
 from app.db.models import Base
