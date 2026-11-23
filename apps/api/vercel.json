@@ -1,5 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "python -m app.hosting",
+  "buildCommand": "PYTHONPATH=. uv run --no-project --python 3.12 --with-requirements requirements-backend.txt python -m app.hosting",
   "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
 }
