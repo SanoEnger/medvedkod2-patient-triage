@@ -32,8 +32,8 @@ Neon URL преобразуется в `postgresql+asyncpg`; сертифика�
 3. Сначала проверить preview выбранной личной ветки. Не переключать production на main.
 4. После получения origin фрейма организаторов добавить его в `frame-ancestors`
    в `apps/web/vercel.json`. Разрешены `'self'` и подтверждённый в браузере
-   `https://web.max.ru`. Если host mini-app использует дополнительный вложенный
-   фрейм на другом origin, его нужно отдельно подтвердить и добавить.
+   `https://web.max.ru`, а также подтверждённый origin вложенного mini-app
+   `https://tm-test-yakut.hostco.ru`. Новые origins нужно подтверждать отдельно.
    Не добавлять X-Frame-Options DENY.
 5. Deployment Protection не должна блокировать пользователей MAX и запросы frontend
    к backend. После проверки передать организаторам публичный URL frontend без token.
