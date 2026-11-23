@@ -20,7 +20,7 @@ test('authenticates relay, forwards correct contract, discards personal fields',
     assert.equal(url.origin, 'https://tm-test-yakut.hostco.ru');
     assert.equal(url.searchParams.get('token'), 'synthetic+jwt');
     assert.equal(options.headers.Authorization, 'Bearer synthetic-service');
-    assert.equal(options.redirect, 'error');
+    assert.equal(options.redirect, 'manual');
     return Response.json({_id:'synthetic-id', SNILS:'private', phone:'private'});
   });
   assert.equal(response.status,200);
@@ -42,7 +42,7 @@ test('oversized body and arbitrary destination are rejected', async () => {
   assert.equal((await handle(request({token:'x',url:'https://other.example'}),env,()=>assert.fail())).status,422);
 });
 
-for (const [status, expected] of [[401,401],[404,401],[403,503],[500,503]]) {
+for (const [status, expected] of [[302,503],[401,401],[404,401],[403,503],[500,503]]) {
   test(`Core ${status} never grants an identity`, async () => {
     const response = await handle(request(),env,async()=>new Response('private upstream error',{status}));
     assert.equal(response.status,expected);

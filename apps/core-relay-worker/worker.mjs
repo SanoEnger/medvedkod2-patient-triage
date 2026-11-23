@@ -68,7 +68,7 @@ export async function handle(request, env, fetchCore = fetch) {
   url.searchParams.set('token', body.token);
   try {
     const response = await fetchCore(url, {
-      method:'GET', redirect:'error', signal:AbortSignal.timeout(4000),
+      method:'GET', redirect:'manual', signal:AbortSignal.timeout(4000),
       headers:{Authorization:'Bearer ' + env.CORE_SERVICE_TOKEN, Accept:'application/json'},
     });
     if (response.status !== 200) {
