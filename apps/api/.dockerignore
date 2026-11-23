@@ -1,5 +1,6 @@
 *
 !requirements-backend.txt
+!requirements-voice.txt
 !app/
 !app/**
 !alembic/

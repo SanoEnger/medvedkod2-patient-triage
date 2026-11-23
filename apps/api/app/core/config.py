@@ -21,6 +21,7 @@ class Settings:
     survey_ttl_seconds: int = 86400
     core_timeout_seconds: float = 6.0
     nlp_mode: str = "mock"
+    whisper_model_path: str = ""
     database_url: str = field(default="", repr=False)
     database_ssl_ca_file: str = ""
     data_encryption_key_file: str = field(default="", repr=False)
@@ -43,6 +44,7 @@ class Settings:
             survey_ttl_seconds=min(int(os.getenv("SURVEY_TTL_SECONDS", "86400")), 86400),
             core_timeout_seconds=float(os.getenv("CORE_TIMEOUT_SECONDS", "6")),
             nlp_mode=os.getenv("NLP_MODE", "mock"),
+            whisper_model_path=os.getenv("WHISPER_MODEL_PATH", ""),
             database_url=os.getenv("DATABASE_URL", ""),
             database_ssl_ca_file=os.getenv("DATABASE_SSL_CA_FILE", ""),
             data_encryption_key_file=os.getenv("DATA_ENCRYPTION_KEY_FILE", ""),

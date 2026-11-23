@@ -24,6 +24,19 @@ docker compose up --build -d
 
 Открыть https://localhost:8443. Инструкция по локальному сертификату, настройкам и сохранению данных — [Docker](docs/DOCKER.md).
 
+## Голосовой ввод
+
+Диктовка на русском доступна в текстовых полях анкеты и в чате. Запись длится до 30 секунд. После остановки распознанный текст добавляется в черновик. Приложение обрабатывает аудио на своём сервере и не сохраняет запись в базе.
+
+Подготовьте модель один раз из корня репозитория:
+
+```powershell
+python -m pip install -r apps/api/requirements-voice.txt
+python -c "from faster_whisper.utils import download_model; download_model('base', output_dir='.local/models/whisper-base')"
+```
+
+Для Docker задайте `INSTALL_VOICE=1` в корневом `.env` и запустите `docker compose up --build -d`. При запуске API без Docker укажите в `apps/api/.env` абсолютный путь к скачанной папке в `WHISPER_MODEL_PATH`. Откройте приложение по HTTPS и разрешите доступ к микрофону.
+
 ## Компоненты и запуск
 
 - [PostgreSQL](apps/api/README_POSTGRES.md) — схема, миграции и запуск БД.

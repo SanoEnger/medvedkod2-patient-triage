@@ -126,11 +126,11 @@ function Workspace({ client }: { client: MedvedClient }) {
     {page === 'result' && resultId && <SavedSurveyResultPage key={resultId} id={resultId} client={client} chatBlocked={chatBlocked}
       onHistory={() => navigate('history')} onChat={() => openChat(resultId)} />}
     {surveyOpened && <div hidden={page !== 'survey'}>
-      <QuestionnairePage key={surveyKey} client={client} initialSurvey={initialSurvey} active={page === 'survey'} onSessionChange={setSurvey}
+      <QuestionnairePage key={surveyKey} client={client} initialSurvey={initialSurvey} active={page === 'survey'} onSessionChange={setSurvey} transcribe={client.transcribe}
         onHome={() => navigate('welcome')} onChat={(id) => openChat(id)} />
     </div>}
     {chatTarget && <div hidden={page !== 'chat'}>
-      <ChatPage key={chatTarget.key} client={client.chat} questionnaireId={chatTarget.questionnaireId} saved={chatTarget.saved}
+      <ChatPage key={chatTarget.key} client={client.chat} questionnaireId={chatTarget.questionnaireId} saved={chatTarget.saved} transcribe={client.transcribe}
         active={page === 'chat'} blocked={chatBlocked} onHome={() => navigate('welcome')}
         onHistory={() => { setChatTarget(null); navigate('history') }}
         onSurvey={() => {

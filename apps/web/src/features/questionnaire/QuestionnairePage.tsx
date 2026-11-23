@@ -3,6 +3,7 @@ import { Button, Card } from '../../components/ui'
 import { Icon } from '../../components/Icon'
 import { QUESTIONS } from '../../api/contracts'
 import type { Survey, SurveyClient, Triage } from '../../api/contracts'
+import type { TranscribeAudio } from '../../api/client'
 import { titles, draftsFromAnswers } from './fields'
 import { QuestionForm } from './QuestionForm'
 import { useQuestionnaire } from './useQuestionnaire'
@@ -39,9 +40,10 @@ function errorText(status: number, invalid: boolean, hasSession: boolean): strin
   return 'Не удалось подтвердить действие. Проверьте подключение и повторите попытку.'
 }
 
-export function QuestionnairePage({ client, onHome, onChat, initialSurvey, active = true, onSessionChange }: {
+export function QuestionnairePage({ client, onHome, onChat, initialSurvey, active = true, onSessionChange, transcribe }: {
   client: SurveyClient; onHome: () => void; onChat?: (id: string) => void; initialSurvey?: Survey | null
   active?: boolean; onSessionChange?: (survey: Survey | null) => void
+  transcribe?: TranscribeAudio
 }) {
   const flow = useQuestionnaire(client, initialSurvey)
   const [drafts, setDrafts] = useState(() => draftsFromAnswers(initialSurvey?.answers))
@@ -118,7 +120,7 @@ export function QuestionnairePage({ client, onHome, onChat, initialSurvey, activ
           question ? <Card>
             <p className="eyebrow">Шаг {flow.survey.progress.answered + 1} из {flow.survey.progress.total}</p>
             <h1 ref={heading} tabIndex={-1}>{titles[question]}</h1>
-            <QuestionForm key={question} question={question} drafts={drafts} onChange={setDrafts}
+            <QuestionForm key={question} question={question} drafts={drafts} onChange={setDrafts} active={active} transcribe={transcribe}
               onAnswer={(body) => { void flow.answer(body) }} disabled={flow.busy || flow.uncertainAnswer || flow.error?.status === 409} />
             {flow.survey.progress.answered > 0 && <Button icon="arrow-left" className="back-action" variant="secondary" disabled={flow.busy || flow.uncertainAnswer || flow.error?.status === 409}
               onClick={() => { void flow.back(flow.survey!.progress.answered - 1) }}>Назад</Button>}

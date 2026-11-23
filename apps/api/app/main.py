@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.api.chat_routes import router as chat_router
 from app.api.routes import router
+from app.api.voice_routes import MAX_AUDIO_BYTES, TRANSCRIPTION_PATH, router as voice_router
 from app.core.config import Settings
 from app.core.encryption import JsonCipher
 from app.core.observability import RequestLoggingMiddleware, configure_logging, event
@@ -94,6 +95,7 @@ def create_app(
     app.state.chat = chat_service
     app.state.max_core = max_core or MaxCoreClient(settings)
     app.state.launch_limiter = LocalRateLimiter()
+    app.state.voice_lock = asyncio.Lock()
     if settings.cors_origins:
         app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins),
                            allow_methods=["GET", "POST", "DELETE"],
@@ -113,7 +115,8 @@ def create_app(
         headers["Strict-Transport-Security"] = "max-age=31536000"
         if request.headers.get("content-length"):
             try:
-                if int(request.headers["content-length"]) > 16384:
+                limit = MAX_AUDIO_BYTES if request.url.path == TRANSCRIPTION_PATH else 16384
+                if int(request.headers["content-length"]) > limit:
                     return JSONResponse(status_code=413, content={"detail": "request_too_large"}, headers=headers)
             except ValueError:
                 return JSONResponse(status_code=400, content={"detail": "invalid_request_length"}, headers=headers)
@@ -127,5 +130,6 @@ def create_app(
 
     app.include_router(router)
     app.include_router(chat_router)
+    app.include_router(voice_router)
     app.add_middleware(RequestLoggingMiddleware)
     return app
