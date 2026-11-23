@@ -29,7 +29,7 @@ test('every history field has an independent No option and restores its draft', 
     expect(screen.queryByRole('textbox', { name: label })).not.toBeInTheDocument()
     if (key === 'chronic_conditions') expect(screen.getByLabelText('Принимаемые лекарства')).toHaveValue('Запись о препарате')
   }
-  await user.click(screen.getByRole('button', { name: 'Сохранить ответы и посмотреть итог' }))
+  await user.click(screen.getByRole('button', { name: 'Завершить опрос и посмотреть итог' }))
   expect(answer).toHaveBeenLastCalledWith({
     question_key: 'medical_history',
     value: Object.fromEntries(HISTORY_FIELDS.map((key) => [key, ['Нет']])),
@@ -37,7 +37,7 @@ test('every history field has an independent No option and restores its draft', 
   await user.click(screen.getByRole('checkbox', { name: 'Нет: Принимаемые лекарства' }))
   expect(screen.getByLabelText('Принимаемые лекарства')).toHaveValue('Запись о препарате')
   expect(screen.getByRole('checkbox', { name: 'Нет: Хронические заболевания' })).toBeChecked()
-  await user.click(screen.getByRole('button', { name: 'Сохранить ответы и посмотреть итог' }))
+  await user.click(screen.getByRole('button', { name: 'Завершить опрос и посмотреть итог' }))
   expect(answer).toHaveBeenLastCalledWith(expect.objectContaining({
     value: expect.objectContaining({ medications: ['Запись о препарате'], chronic_conditions: ['Нет'] }),
   }))

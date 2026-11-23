@@ -56,10 +56,11 @@ class JsonCipher:
 
     @classmethod
     def from_file(cls, path: str) -> "JsonCipher":
-        if not path:
-            raise ValueError("DATA_ENCRYPTION_KEY_FILE is required")
+        if not path and not os.environ.get("DATA_ENCRYPTION_KEY"):
+            raise ValueError("DATA_ENCRYPTION_KEY_FILE or DATA_ENCRYPTION_KEY is required")
         try:
-            encoded = Path(path).read_bytes().strip()
+            # Managed hosts provide persistent secrets as environment variables.
+            encoded = Path(path).read_bytes().strip() if path else os.environ.get("DATA_ENCRYPTION_KEY", "").strip().encode("ascii")
             key = base64.b64decode(encoded, altchars=b"-_", validate=True)
         except (OSError, ValueError, binascii.Error):
             raise ValueError("Cannot read a valid data encryption key file") from None

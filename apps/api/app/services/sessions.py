@@ -12,7 +12,9 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+from app.core.observability import event
 from app.integrations.groq import SymptomExtractor
+from app.integrations.groq.exceptions import GroqError
 from app.integrations.groq.schemas import ExtractionResult
 from app.schemas.survey import (
     QUESTION_MODELS,
@@ -91,8 +93,11 @@ class MemorySurveyStore:
 
 class SessionService:
     """Questionnaire engine with transactional storage."""
-    def __init__(self, ttl_seconds: int = 86400, store: SurveyStore | None = None, *, extractor: SymptomExtractor | None = None) -> None:
+    def __init__(self, ttl_seconds: int = 86400, store: SurveyStore | None = None, *, extractor: SymptomExtractor | None = None,
+                 analyst=None, analysis_source: str = "groq") -> None:
         self._extractor = extractor
+        self._analyst = analyst
+        self._analysis_source = analysis_source
         self._ttl_seconds = ttl_seconds
         self._store = store or MemorySurveyStore()
 
@@ -253,6 +258,8 @@ class SessionService:
 
     async def triage(self, session_id: UUID, owner_id: str) -> TriageResponse:
         async with self._store.open(session_id, owner_id) as survey:
+            if survey.status == SurveyStatus.COMPLETED and survey.result and survey.result.get("analysis_source"):
+                return TriageResponse.model_validate(survey.result)
             survey.rule_codes = find_emergency_rules(survey.answers)
             if survey.rule_codes:
                 survey.status = SurveyStatus.EMERGENCY_STOP
@@ -260,7 +267,30 @@ class SessionService:
             survey.result = result.model_dump()
             if survey.status == SurveyStatus.REVIEWING:
                 survey.status = SurveyStatus.COMPLETED
-            return result
+            if survey.status != SurveyStatus.COMPLETED or survey.rule_codes or self._analyst is None:
+                return result
+            revision = survey.revision
+            answers = json.loads(json.dumps(survey.answers))
+        # The provider proposes a specialty from answers, never from the rule result.
+        event("survey.analysis_started", mode=self._analysis_source)
+        try:
+            reply = await self._analyst.analyze(answers)
+            result.analysis = reply.text
+            result.specialty = reply.specialty
+            result.rationale = reply.rationale
+            result.needs_clarification = reply.needs_clarification or result.urgency == "UNKNOWN"
+            result.analysis_source = self._analysis_source
+            event("survey.analysis_completed", mode=self._analysis_source)
+        except GroqError as error:
+            result.analysis_source = "unavailable"
+            event("survey.analysis_failed", code=error.code)
+        async with self._store.open(session_id, owner_id) as survey:
+            if survey.revision != revision or survey.status != SurveyStatus.COMPLETED:
+                raise HTTPException(status_code=409, detail="questionnaire_changed")
+            if survey.result and survey.result.get("analysis_source"):
+                return TriageResponse.model_validate(survey.result)
+            survey.result = result.model_dump()
+        return result
 
     async def delete(self, session_id: UUID, owner_id: str) -> None:
         await self._store.delete(session_id, owner_id)

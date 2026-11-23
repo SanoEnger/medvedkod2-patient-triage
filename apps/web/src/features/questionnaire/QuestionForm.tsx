@@ -123,7 +123,7 @@ export function QuestionForm({ question, drafts, onChange, onAnswer, disabled }:
           onChange={(value) => update('medical_history', { ...drafts.medical_history, [key]: value })} />)}
       </>}
       {error && <p className="field-error" role="alert">{error}</p>}
-      <Button icon={question === 'medical_history' ? 'check' : 'arrow-right'} className="wide" type="submit">{question === 'medical_history' ? 'Сохранить ответы и посмотреть итог' : 'Продолжить'}</Button>
+      <Button icon={question === 'medical_history' ? 'check' : 'arrow-right'} className="wide" type="submit">{question === 'medical_history' ? 'Завершить опрос и посмотреть итог' : 'Продолжить'}</Button>
     </fieldset>
   </form>
 }

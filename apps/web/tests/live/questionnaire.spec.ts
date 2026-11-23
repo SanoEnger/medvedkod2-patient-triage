@@ -24,7 +24,7 @@ test('real browser → HTTPS API → PostgreSQL, editing, completion and delete'
   expect((await medical).postDataJSON().value.hospitalizations_last_year).toEqual(['Synthetic admission'])
   await expect(page.getByText('Дерматолог', { exact: true })).toBeVisible()
   const id = [...ids][0]
-  await page.getByRole('button', { name: 'Завершить опрос' }).click()
+  await expect(page.getByRole('button', { name: 'Завершить опрос', exact: true })).toHaveCount(0)
   await expect(page.getByText(/Ответы сохранены/)).toBeVisible()
   let state = await request.get(origin + '/api/v1/sessions/' + id, { headers: { Authorization: 'Bearer ' + token } })
   expect((await state.json()).status).toBe('COMPLETED')
@@ -79,7 +79,7 @@ test('real incomplete data remain UNKNOWN', async ({ page }) => {
   await start(page, '/')
   await page.getByRole('radio', { name: 'Другое', exact: true }).check()
   for (let step = 0; step < 4; step++) await page.getByRole('button', { name: 'Продолжить' }).click()
-  await page.getByRole('button', { name: 'Сохранить ответы и посмотреть итог' }).click()
+  await page.getByRole('button', { name: 'Завершить опрос и посмотреть итог' }).click()
   await expect(page.getByText('Нужно уточнение', { exact: true })).toBeVisible()
   await expect(page.getByText('Самопомощь', { exact: true })).toHaveCount(0)
 })

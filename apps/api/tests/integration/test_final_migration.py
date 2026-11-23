@@ -96,7 +96,7 @@ def test_revision_03_results_are_moved_without_losing_history_or_idempotency(
                         TriageResultRecord.session_id == sid
                     )
                 )
-                assert decode_result(result, cipher) == RESULT
+                assert decode_result(result, cipher) == {**RESULT, "analysis": None, "analysis_source": None}
                 assert result.version == "legacy-unversioned"
                 session = await db.get(SessionRecord, sid)
                 state = cipher.decrypt(session.state_jsonb, state_context(sid))

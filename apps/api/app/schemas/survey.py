@@ -135,6 +135,8 @@ class SessionResponse(StrictModel):
 
 
 class TriageResponse(StrictModel):
+    analysis: str | None = Field(default=None, max_length=6000)
+    analysis_source: Literal["groq", "mock", "unavailable"] | None = None
     urgency: Literal["EMERGENCY", "WITHIN_24H", "PLANNED", "SELF_CARE", "UNKNOWN"]
     specialty: str | None
     place: str | None

@@ -18,6 +18,8 @@ export interface Answers {
 }
 export type AnswerRequest = { [K in QuestionKey]: { question_key: K; value: Answers[K]; idempotency_key: string } }[QuestionKey]
 export interface Triage {
+  analysis?: string | null
+  analysis_source?: 'groq' | 'mock' | 'unavailable' | null
   urgency: Urgency
   specialty: string | null
   place: string | null

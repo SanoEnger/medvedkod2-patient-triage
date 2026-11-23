@@ -29,7 +29,9 @@ export function emergencyHint(value: unknown): boolean {
 export function parseTriage(value: unknown): Triage {
   if (!object(value) || !urgency.includes(String(value.urgency)) || !nullableText(value.specialty)
     || !nullableText(value.place) || typeof value.rationale !== 'string' || typeof value.disclaimer !== 'string'
-    || !value.disclaimer || !strings(value.rule_codes) || typeof value.needs_clarification !== 'boolean') {
+    || !value.disclaimer || !strings(value.rule_codes) || typeof value.needs_clarification !== 'boolean'
+    || !(value.analysis === undefined || nullableText(value.analysis))
+    || !(value.analysis_source == null || ['groq', 'mock', 'unavailable'].includes(String(value.analysis_source)))) {
     throw new ApiError(0, emergencyHint(value), true)
   }
   return value as unknown as Triage

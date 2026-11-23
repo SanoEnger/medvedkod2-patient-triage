@@ -212,7 +212,8 @@ async def test_completed_result_and_back_are_persistent(api):
         cipher = JsonCipher.from_file(Settings.from_env().data_encryption_key_file)
         results = [cipher.decrypt(row.content_jsonb, message_context(UUID(sid), row.id))
                    for row in history if row.kind == "result"]
-        assert results[0]["result"] == result.json()
+        assert results[-1]["result"] == result.json()
+        assert results[0]["result"]["analysis"] is None
         assert "medical_history" in results[0]["answers"]
         assert any(row.kind == "back" for row in history)
 
