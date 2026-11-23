@@ -26,6 +26,11 @@ for (const [width, height] of [[360, 640], [390, 844], [768, 1024], [1440, 900]]
     await page.getByLabel('Что беспокоит — своими словами').fill('Synthetic test text')
     await page.getByRole('button', { name: 'Продолжить' }).click()
     await expect(page.getByRole('heading', { level: 1 })).toBeFocused()
+    if (width >= 768) {
+      const age = await page.getByLabel('Возраст в полных годах').boundingBox()
+      const sex = await page.getByLabel('Пол', { exact: true }).boundingBox()
+      expect(Math.abs(age!.y - sex!.y)).toBeLessThan(2)
+    }
     await page.getByRole('button', { name: 'Назад', exact: true }).click()
     await expect(page.getByLabel('Что беспокоит — своими словами')).toHaveValue('Synthetic test text')
     await expect(page.getByRole('radio', { name: 'Кожа', exact: true })).toBeChecked()

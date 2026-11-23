@@ -54,6 +54,19 @@ def test_key_file_and_missing_key(tmp_path):
         JsonCipher.from_file("")
 
 
+def test_environment_key_for_managed_host(monkeypatch):
+    monkeypatch.setenv("DATA_ENCRYPTION_KEY", base64.b64encode(b"v" * 32).decode())
+    cipher = JsonCipher.from_file("")
+    assert cipher.decrypt(cipher.encrypt({"synthetic": True}, "test"), "test") == {"synthetic": True}
+
+
+@pytest.mark.parametrize("key", ["invalid", "", base64.b64encode(b"short").decode()])
+def test_invalid_environment_key_fails_closed(monkeypatch, key):
+    monkeypatch.setenv("DATA_ENCRYPTION_KEY", key)
+    with pytest.raises(ValueError):
+        JsonCipher.from_file("")
+
+
 def test_database_uses_verified_tls(monkeypatch):
     captured = {}
     monkeypatch.setattr("app.db.engine.create_async_engine", lambda *a, **kw: captured.update(kw))
