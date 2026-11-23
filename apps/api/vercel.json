@@ -1,4 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "python -m app.hosting",
   "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
 }
