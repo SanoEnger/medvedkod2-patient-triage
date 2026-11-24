@@ -1,6 +1,7 @@
 """Validated extraction plus independent lexical evidence preservation."""
 
 import json
+import re
 
 from pydantic import ValidationError
 
@@ -10,6 +11,13 @@ from .fallback import extract_local
 from .schemas import ExtractionResult, ModelExtraction
 from app.integrations.prompt_security import instruction_attack
 from app.core.observability import event
+
+
+def source_quote(text: str, value: str) -> str | None:
+    if value in text:
+        return value
+    match = re.search(re.escape(value), text, re.IGNORECASE)
+    return match.group(0) if match else None
 
 
 class SymptomExtractor:
@@ -37,11 +45,16 @@ class SymptomExtractor:
                 model = ModelExtraction.model_validate(json.loads(raw))
                 # Evidence grounding prevents invented text; semantics still require review.
                 for item in [*model.symptoms, *model.details]:
-                    if item.evidence not in text:
+                    quote = source_quote(text, item.evidence)
+                    if quote is None:
                         raise ValueError("ungrounded")
+                    item.evidence = quote
                 for symptom in model.symptoms:
-                    if any(value is not None and value not in text for value in (symptom.location, symptom.duration)):
-                        raise ValueError("ungrounded")
+                    # Optional descriptors must not discard a grounded critical symptom.
+                    for field in ("location", "duration"):
+                        value = getattr(symptom, field)
+                        if value is not None:
+                            setattr(symptom, field, source_quote(text, value))
                     if symptom.code == "dyspnea_rest" and "в покое" not in symptom.evidence.lower():
                         raise ValueError("ungrounded")
             except GroqError as exc:
@@ -50,6 +63,7 @@ class SymptomExtractor:
                     "server_error", "http_error", "invalid_response",
                 } else "provider_error"
             except (ValidationError, ValueError, TypeError):
+                event("groq.extraction_rejected", code="invalid_or_ungrounded_response")
                 reason = "invalid_response"
         if reason is not None:
             return ExtractionResult(**local.model_dump(), source="fallback", mode=mode, fallback_reason=reason)
