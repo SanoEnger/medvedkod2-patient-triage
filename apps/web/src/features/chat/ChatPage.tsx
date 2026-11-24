@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ApiError } from '../../api/client'
+import type { TranscribeAudio } from '../../api/client'
 import type { ChatClient, ChatSummary, Conversation } from '../../api/chat'
 import { Button, Card } from '../../components/ui'
+import { VoiceInput } from '../../components/VoiceInput'
 import medvedUrl from '../../assets/medved-bear-button.svg?url'
 import { DeleteChatDialog } from './DeleteChatDialog'
 
@@ -26,10 +28,11 @@ function errorText(error: unknown, fallback = 'Не удалось обнови�
   return fallback
 }
 
-export function ChatPage({ client, questionnaireId, saved, active, blocked, onHome, onHistory, onSurvey, onNew, onDeleted }: {
+export function ChatPage({ client, questionnaireId, saved, active, blocked, onHome, onHistory, onSurvey, onNew, onDeleted, transcribe }: {
   client: ChatClient; questionnaireId?: string; saved?: ChatSummary; active: boolean; blocked: boolean
   onHome: () => void; onSurvey: () => void; onNew: () => void
   onHistory?: () => void; onDeleted?: (id: string) => void
+  transcribe?: TranscribeAudio
 }) {
   const [chat, setChat] = useState<Conversation | null>(null)
   const [draft, setDraft] = useState('')
@@ -221,10 +224,13 @@ export function ChatPage({ client, questionnaireId, saved, active, blocked, onHo
     {!chat && !busy && <Button icon="restart" onClick={() => setAttempt((value) => value + 1)}>Повторить открытие</Button>}
     {chat && !chat.emergency && <form className="chat-composer" onSubmit={(event) => { void send(event) }}>
       <label htmlFor="chat-message">Ваше сообщение</label>
-      <textarea id="chat-message" maxLength={2000} rows={3} value={draft} disabled={busy || blocked || waitingForReply}
-        readOnly={!!pending.current} onChange={(event) => setDraft(event.target.value)}
-        placeholder="Что вы хотите уточнить?"
-        onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }} />
+      <VoiceInput label="Ваше сообщение" value={draft} onChange={setDraft} maxLength={2000} transcribe={transcribe}
+        disabled={!active || busy || blocked || waitingForReply || !!pending.current || confirmDelete}>
+        <textarea id="chat-message" maxLength={2000} rows={3} value={draft} disabled={busy || blocked || waitingForReply}
+          readOnly={!!pending.current} onChange={(event) => setDraft(event.target.value)}
+          placeholder="Что вы хотите уточнить?"
+          onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }} />
+      </VoiceInput>
       <p className="field-hint">До 2000 символов. Не указывайте имя, телефон, адрес и данные документов.</p>
       <div className="form-actions">
         <Button icon="arrow-right" type="submit" disabled={busy || blocked || !draft.trim() || waitingForReply}>

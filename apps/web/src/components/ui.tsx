@@ -1,6 +1,8 @@
 import { useId } from 'react'
 import { Icon } from './Icon'
 import type { IconName } from './Icon'
+import { VoiceInput } from './VoiceInput'
+import type { VoiceOptions } from './VoiceInput'
 import type { ButtonHTMLAttributes, HTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
 
 export function Button({ variant = 'primary', className = '', type = 'button', icon, children, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary'; icon?: IconName }) {
@@ -18,13 +20,15 @@ export function SelectField({ label, children, ...props }: SelectHTMLAttributes<
   return <div className="field"><label htmlFor={id}>{label}</label><select id={id} {...props}>{children}</select></div>
 }
 
-export function TextAreaField({ label, hint, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement> & { label: string; hint: string }) {
+export function TextAreaField({ label, hint, voice, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement> & { label: string; hint: string; voice?: VoiceOptions }) {
   const id = useId()
-  return <div className="field"><label htmlFor={id}>{label}</label><textarea id={id} aria-describedby={`${id}-hint`} {...props} /><p id={`${id}-hint`} className="field-hint">{hint}</p></div>
+  const control = <textarea id={id} aria-describedby={`${id}-hint`} {...props} />
+  return <div className="field"><label htmlFor={id}>{label}</label>{voice ? <VoiceInput label={label} {...voice}>{control}</VoiceInput> : control}<p id={`${id}-hint`} className="field-hint">{hint}</p></div>
 }
 
 
-export function TextField({ label, hint, ...props }: InputHTMLAttributes<HTMLInputElement> & { label: string; hint: string }) {
+export function TextField({ label, hint, voice, ...props }: InputHTMLAttributes<HTMLInputElement> & { label: string; hint: string; voice?: VoiceOptions }) {
   const id = useId()
-  return <div className="field"><label htmlFor={id}>{label}</label><input id={id} aria-describedby={id + '-hint'} {...props} /><p id={id + '-hint'} className="field-hint">{hint}</p></div>
+  const control = <input id={id} aria-describedby={id + '-hint'} {...props} />
+  return <div className="field"><label htmlFor={id}>{label}</label>{voice ? <VoiceInput label={label} {...voice}>{control}</VoiceInput> : control}<p id={id + '-hint'} className="field-hint">{hint}</p></div>
 }

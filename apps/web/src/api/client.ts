@@ -3,7 +3,8 @@ import { QUESTIONS } from './contracts'
 import type { Survey, SurveyClient, Triage } from './contracts'
 import type { ChatClient, ChatHistory, Conversation } from './chat'
 
-export interface MedvedClient extends SurveyClient { chat: ChatClient }
+export type TranscribeAudio = (audio: Blob, signal: AbortSignal) => Promise<string>
+export interface MedvedClient extends SurveyClient { chat: ChatClient; transcribe?: TranscribeAudio }
 
 export class ApiError extends Error {
   constructor(public readonly status = 0, public readonly emergency = false, public readonly invalidResponse = false,
@@ -98,11 +99,13 @@ export function createApiClient(mode: 'demo' | 'max', onAuthorizationExpired?: (
   async function request(path: string, method: string, body?: unknown, signal?: AbortSignal, token?: string): Promise<unknown> {
     let response: Response
     try {
+      const audio = body instanceof Blob ? body : undefined
+      const timeout = AbortSignal.timeout(audio ? 65000 : path.startsWith('/api/v1/chats') ? 30000 : 15000)
       response = await fetch(apiEndpoint(path), {
-        method, headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: 'Bearer ' + token } : {}) },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        method, headers: { ...(body === undefined ? {} : { 'Content-Type': audio?.type || 'application/json' }), ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+        body: audio ?? (body === undefined ? undefined : JSON.stringify(body)),
         credentials: 'omit', cache: 'no-store', redirect: 'error', referrerPolicy: 'no-referrer',
-        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(path.startsWith('/api/v1/chats') ? 30000 : 15000)]) : AbortSignal.timeout(path.startsWith('/api/v1/chats') ? 30000 : 15000),
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       })
     } catch (error) { if (error instanceof ApiError) throw error; throw new ApiError() }
     if (method === 'DELETE' && response.status === 204) return undefined
@@ -139,6 +142,11 @@ export function createApiClient(mode: 'demo' | 'max', onAuthorizationExpired?: (
   }
   const path = (id: string) => '/api/v1/sessions/' + encodeURIComponent(id)
   return {
+    transcribe: async (audio, signal) => {
+      const value = await call('/api/v1/voice/transcriptions', 'POST', audio, signal)
+      if (!object(value) || typeof value.text !== 'string' || !value.text.trim()) throw new ApiError(0, false, true)
+      return value.text.trim()
+    },
     chat: {
       list: async ({ cursor, kind } = {}, signal) => {
         const params = new URLSearchParams()

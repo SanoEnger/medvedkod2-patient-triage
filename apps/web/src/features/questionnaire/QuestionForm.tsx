@@ -3,6 +3,9 @@ import type { FormEvent } from 'react'
 import { Button, SelectField, TextAreaField, TextField } from '../../components/ui'
 import { Icon } from '../../components/Icon'
 import type { IconName } from '../../components/Icon'
+import { VoiceInput } from '../../components/VoiceInput'
+import type { VoiceOptions } from '../../components/VoiceInput'
+import type { TranscribeAudio } from '../../api/client'
 import { HISTORY_FIELDS, RED_FLAGS } from '../../api/contracts'
 import type { AnswerRequest, Category, QuestionKey, Sex } from '../../api/contracts'
 import { answerFromDraft, categories, flagLabels, historyLabels } from './fields'
@@ -25,9 +28,10 @@ function Choices({ label, value, onChange }: { label: string; value: Choice; onC
   </fieldset>
 }
 
-function HistoryField({ label, value, none, onNoneChange, onChange }: {
+function HistoryField({ label, value, none, onNoneChange, onChange, transcribe, voiceDisabled }: {
   label: string; value: string; none: boolean
   onNoneChange: (none: boolean) => void; onChange: (value: string) => void
+  transcribe?: TranscribeAudio; voiceDisabled: boolean
 }) {
   const id = useId()
   return <fieldset className="field history-field">
@@ -37,15 +41,18 @@ function HistoryField({ label, value, none, onNoneChange, onChange }: {
       <span>Нет</span>
     </label>
     {!none && <>
-      <textarea id={id} aria-labelledby={id + '-label'} aria-describedby={id + '-hint'} rows={3} maxLength={1300} value={value} onChange={(event) => onChange(event.target.value)} />
+      <VoiceInput label={label} value={value} onChange={onChange} maxLength={1300} transcribe={transcribe} disabled={voiceDisabled} separator={'\n'}>
+        <textarea id={id} aria-labelledby={id + '-label'} aria-describedby={id + '-hint'} rows={3} maxLength={1300} value={value} onChange={(event) => onChange(event.target.value)} />
+      </VoiceInput>
       <p id={id + '-hint'} className="field-hint">До 10 записей: с новой строки или через точку с запятой. Каждая запись — до 120 символов.</p>
     </>}
   </fieldset>
 }
 
-export function QuestionForm({ question, drafts, onChange, onAnswer, disabled }: {
+export function QuestionForm({ question, drafts, onChange, onAnswer, disabled, transcribe, active = true }: {
   question: QuestionKey; drafts: Drafts; onChange: (drafts: Drafts) => void
   onAnswer: (body: Omit<AnswerRequest, 'idempotency_key'>) => void; disabled: boolean
+  transcribe?: TranscribeAudio; active?: boolean
 }) {
   const [error, setError] = useState('')
   function update<K extends QuestionKey>(key: K, value: Drafts[K]) {
@@ -61,6 +68,14 @@ export function QuestionForm({ question, drafts, onChange, onAnswer, disabled }:
   const primary = drafts.primary_complaint
   const patient = drafts.patient_context
   const details = drafts.symptom_details
+  const voiceDisabled = disabled || !active
+  function voiceField(value: string, maxLength: number, onChange: (value: string) => void): VoiceOptions {
+    return { value, maxLength, onChange, transcribe, disabled: voiceDisabled }
+  }
+  const complaintText = voiceField(primary.text, 1200, (text) => update('primary_complaint', { ...primary, text }))
+  const location = voiceField(details.location, 120, (text) => update('symptom_details', { ...details, location: text }))
+  const duration = voiceField(details.duration, 120, (text) => update('symptom_details', { ...details, duration: text }))
+  const additionalText = voiceField(details.additional_text, 1200, (text) => update('symptom_details', { ...details, additional_text: text }))
   return <form className="question-form" onSubmit={submit}>
     <fieldset className="form-fields" disabled={disabled}>
       <legend className="visually-hidden">Ответ на текущий вопрос</legend>
@@ -73,7 +88,7 @@ export function QuestionForm({ question, drafts, onChange, onAnswer, disabled }:
               <Icon name={categoryIcons[key]} /><span>{label}</span><Icon name="check" className="choice-check" />
             </label>)}</div>
         </fieldset>
-        <TextAreaField label="Что беспокоит — своими словами" hint="Можно оставить пустым. До 1200 символов, без имени, телефона и адреса." maxLength={1200} rows={4} value={primary.text} onChange={(event) => update('primary_complaint', { ...primary, text: event.target.value })} />
+        <TextAreaField label="Что беспокоит — своими словами" hint="Можно оставить пустым. До 1200 символов, без имени, телефона и адреса." maxLength={complaintText.maxLength} rows={4} value={complaintText.value} onChange={(event) => complaintText.onChange(event.target.value)} voice={complaintText} />
       </>}
       {question === 'patient_context' && <>
         <TextField label="Температура тела, °C" type="number" inputMode="decimal" min={30} max={45} step={0.1} value={patient.temperature_c} onChange={(event) => update('patient_context', { ...patient, temperature_c: event.target.value })} hint="Если не измеряли, оставьте поле пустым." />
@@ -97,10 +112,10 @@ export function QuestionForm({ question, drafts, onChange, onAnswer, disabled }:
         </div>}
       </>}
       {question === 'symptom_details' && <>
-        <TextField label="Где ощущаются симптомы?" maxLength={120} value={details.location} onChange={(event) => update('symptom_details', { ...details, location: event.target.value })} hint="Необязательно. До 120 символов." />
-        <TextField label="Как давно появились симптомы?" maxLength={120} value={details.duration} onChange={(event) => update('symptom_details', { ...details, duration: event.target.value })} hint="Например, несколько часов. До 120 символов." />
+        <TextField label="Где ощущаются симптомы?" maxLength={location.maxLength} value={location.value} onChange={(event) => location.onChange(event.target.value)} hint="Необязательно. До 120 символов." voice={location} />
+        <TextField label="Как давно появились симптомы?" maxLength={duration.maxLength} value={duration.value} onChange={(event) => duration.onChange(event.target.value)} hint="Например, несколько часов. До 120 символов." voice={duration} />
         <TextField label="Выраженность симптомов от 0 до 10" type="number" inputMode="numeric" min={0} max={10} step={1} value={details.severity_0_10} onChange={(event) => update('symptom_details', { ...details, severity_0_10: event.target.value })} hint="0 — не ощущаются, 10 — максимально выражены. Если не знаете, оставьте пустым." />
-        <TextAreaField label="Дополнительные сведения о симптомах" hint="Необязательно. До 1200 символов, без личных данных." maxLength={1200} rows={4} value={details.additional_text} onChange={(event) => update('symptom_details', { ...details, additional_text: event.target.value })} />
+        <TextAreaField label="Дополнительные сведения о симптомах" hint="Необязательно. До 1200 символов, без личных данных." maxLength={additionalText.maxLength} rows={4} value={additionalText.value} onChange={(event) => additionalText.onChange(event.target.value)} voice={additionalText} />
       </>}
       {question === 'red_flags' && <>
         <p className="question-note">При ответе «Да» сведения сразу отправятся на проверку серверу. Если есть непосредственная опасность, звоните 103/112.</p>
@@ -115,7 +130,7 @@ export function QuestionForm({ question, drafts, onChange, onAnswer, disabled }:
       {question === 'medical_history' && <>
         <p className="question-note">Заполните то, что известно. Поля можно оставить пустыми.</p>
         {HISTORY_FIELDS.map((key) => <HistoryField key={key} label={historyLabels[key]}
-          value={drafts.medical_history[key]} none={drafts.history_none[key]}
+          value={drafts.medical_history[key]} none={drafts.history_none[key]} transcribe={transcribe} voiceDisabled={voiceDisabled}
           onNoneChange={(none) => {
             setError('')
             onChange({ ...drafts, history_none: { ...drafts.history_none, [key]: none } })

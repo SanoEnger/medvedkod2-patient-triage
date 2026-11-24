@@ -213,6 +213,12 @@ form { margin-top: 28px; }
 .chat-composer { display: grid; gap: 10px; margin-top: 24px; }
 .chat-composer > label { font-size: var(--font-label); font-weight: 600; }
 .chat-composer textarea { font: inherit; font-size: var(--font-field); line-height: var(--text-line-height); width: 100%; min-width: 0; min-height: 120px; resize: vertical; border: 1px solid var(--border); border-radius: 12px; padding: 14px; color: var(--heading); background: var(--card); }
+.voice-field { position: relative; display: grid; gap: 6px; min-width: 0; }
+.field .voice-field > :is(input, textarea), .chat-composer .voice-field > textarea { padding-inline-end: 54px; }
+.voice-button { position: absolute; inset-block-start: 2px; inset-inline-end: 3px; display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 10px; padding: 0; background: transparent; color: #737373; cursor: pointer; }
+.voice-button::before { content: ''; width: 22px; height: 24px; background: currentColor; mask: url('../assets/microphone.svg') center / contain no-repeat; }
+.voice-button[aria-pressed='true'] { color: var(--accent); }
+.voice-button:disabled { cursor: default; }
 .chat-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
 .chat-blocked { margin-bottom: 20px; }
 .chat-blocked .button { margin-top: 14px; }

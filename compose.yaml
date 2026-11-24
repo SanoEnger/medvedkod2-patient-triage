@@ -10,6 +10,8 @@ x-api-image: &api-image
   image: medved-api:local
   build:
     context: ./apps/api
+    args:
+      INSTALL_VOICE: ${INSTALL_VOICE:-0}
 
 services:
   init:
@@ -57,8 +59,10 @@ services:
       CORE_URL: ${CORE_URL:-https://tm-test-yakut.hostco.ru}
       CORE_SERVICE_TOKEN: ${CORE_SERVICE_TOKEN:-}
       FRAME_ANCESTORS: ${FRAME_ANCESTORS:-'self'}
+      WHISPER_MODEL_PATH: /models/whisper-base
     volumes:
       - api-secrets:/run/medved:ro
+      - ./.local/models:/models:ro
     depends_on:
       postgres:
         condition: service_healthy
