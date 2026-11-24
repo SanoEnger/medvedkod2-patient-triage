@@ -31,6 +31,7 @@ export function VoiceInput({ children, ...props }: VoiceProps & { children: Reac
 
   return <div className="voice-field">
     {children}
+    <p className="field-hint">В облачной версии запись распознаётся через Groq Whisper. Проверьте текст перед отправкой.</p>
     <VoiceButton key={props.disabled ? 'disabled' : 'enabled'} {...props} transcribe={props.transcribe} mimeType={mimeType} />
   </div>
 }
