@@ -12,6 +12,16 @@ export type VoiceOptions = {
 type VoiceProps = VoiceOptions & { label: string }
 const mimeTypes = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4']
 
+function microphoneBlockedByPage() {
+  const page = document as Document & {
+    permissionsPolicy?: { allowsFeature: (feature: string) => boolean }
+    featurePolicy?: { allowsFeature: (feature: string) => boolean }
+  }
+  return (page.permissionsPolicy || page.featurePolicy)?.allowsFeature('microphone') === false
+}
+
+const frameMicrophoneError = 'Окно mini-app запрещает доступ к микрофону. Организаторам нужно разрешить микрофон во вложенных окнах MAX. Настройка браузера этот запрет не снимает.'
+
 function release(recording: Recording) {
   window.clearTimeout(recording.timer)
   recording.stream?.getTracks().forEach((track) => track.stop())
@@ -54,6 +64,10 @@ function VoiceButton({ label, value, onChange, maxLength, transcribe, disabled, 
 
   async function start() {
     if (current.current) return
+    if (microphoneBlockedByPage()) {
+      setError(frameMicrophoneError)
+      return
+    }
     const recording: Recording = { controller: new AbortController() }
     const { signal } = recording.controller
     current.current = recording
@@ -100,8 +114,13 @@ function VoiceButton({ label, value, onChange, maxLength, transcribe, disabled, 
       recorder.start()
       setState('recording')
       recording.timer = window.setTimeout(stop, 30000)
-    } catch {
-      finish('Не удалось включить микрофон. Проверьте разрешение на запись.')
+    } catch (cause) {
+      const name = cause instanceof DOMException ? cause.name : ''
+      finish(microphoneBlockedByPage() ? frameMicrophoneError
+        : name === 'NotFoundError' ? 'Микрофон не найден. Подключите его и попробуйте ещё раз.'
+        : name === 'NotReadableError' ? 'Микрофон недоступен. Проверьте, не занят ли он другим приложением, и разрешён ли доступ в настройках устройства.'
+        : name === 'NotAllowedError' ? 'Доступ к микрофону не разрешён. Проверьте разрешение для MAX в браузере или настройках устройства.'
+        : 'Не удалось включить микрофон. Проверьте разрешение на запись.')
     }
   }
 
