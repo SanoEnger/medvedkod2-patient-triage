@@ -1,0 +1,203 @@
+[
+  {
+    "code": "DEMO_SKIN_MILD_V0",
+    "version": "858849a270dcd6465edf78f1bbfa743a0fa2709caabb105b04c2011a7879939d",
+    "severity": "P2",
+    "enabled": true,
+    "predicates": {
+      "review_status": "synthetic_only",
+      "implementation_sha256": "4a93c8df462283885721c44b9f762a1570cb7a8b181e1310e66ede342d0bb4f6",
+      "implementation": "SessionService._triage",
+      "red_flag_fields": [],
+      "confirmed_text_patterns": []
+    }
+  },
+  {
+    "code": "RF_ACUTE_ABDOMINAL_PAIN",
+    "version": "149ffda0b110edaaffc53f8cf52e6234d8f6422e63663c6333728727149b90a9",
+    "severity": "P0",
+    "enabled": true,
+    "predicates": {
+      "review_status": "synthetic_only",
+      "implementation_sha256": "4a93c8df462283885721c44b9f762a1570cb7a8b181e1310e66ede342d0bb4f6",
+      "implementation": "find_emergency_rules",
+      "red_flag_fields": [
+        "acute_abdominal_pain"
+      ],
+      "confirmed_text_patterns": [
+        "остр\\w*\\s+бол\\w*\\s+в\\s+животе",
+        "резк\\w*\\s+бол\\w*\\s+в\\s+животе",
+        "сильн\\w*\\s+бол\\w*\\s+в\\s+животе"
+      ]
+    }
+  },
+  {
+    "code": "RF_ANAPHYLAXIS",
+    "version": "af360e4df856a6b8d363c2a268ca0f155dcb37f9adeee0623a7d82f05bebb871",
+    "severity": "P0",
+    "enabled": true,
+    "predicates": {
+      "review_status": "synthetic_only",
+      "implementation_sha256": "4a93c8df462283885721c44b9f762a1570cb7a8b181e1310e66ede342d0bb4f6",
+      "implementation": "find_emergency_rules",
+      "red_flag_fields": [
+        "anaphylaxis"
+      ],
+      "confirmed_text_patterns": [
+        "анафилакси\\w*",
+        "анафилактическ\\w*\\s+шок",
+        "от[её]к\\s+горла",
+        "отекает\\s+горло"
+      ]
+    }
+  },
+  {
+    "code": "RF_BLEEDING",
+    "version": "fd2cec6a3e65339a7af67099efdd8e5ae95fc95c2fb86922cf3b2bdb48ccebd8",
+    "severity": "P0",
+    "enabled": true,
+    "predicates": {
+      "review_status": "synthetic_only",
+      "implementation_sha256": "4a93c8df462283885721c44b9f762a1570cb7a8b181e1310e66ede342d0bb4f6",
+      "implementation": "find_emergency_rules",
+      "red_flag_fields": [
+        "bleeding"
+      ],
+      "confirmed_text_patterns": [
+        "кровотечени\\w*",
+        "сильн\\w*\\s+кров\\w*",
+        "ид[её]т\\s+кровь"
+      ]
+    }
+  },
+  {
+    "code": "RF_CHEST_PAIN",
+    "version": "ac5325a85833fca9389d3486eb0f2c3ab64a4afab2ff837c86718fc4cf26fe3c",
+    "severity": "P0",
+    "enabled": true,
+    "predicates": {
+      "review_status": "synthetic_only",
+      "implementation_sha256": "4a93c8df462283885721c44b9f762a1570cb7a8b181e1310e66ede342d0bb4f6",
+      "implementation": "find_emergency_rules",
+      "red_flag_fields": [
+        "chest_pain"
+      ],
+      "confirmed_text_patterns": [
+        "бол(?:ь|ит|и)\\s+(?:в\\s+)?груд[ьи]",
+        "бол(?:ь|ит)\\s+за\\s+грудиной",
+        "боль\\s+в\\s+грудной\\s+клетке"
+      ]
+    }
+  },
+  {
+    "code": "RF_CHILD_FEVER_39_5",
+    "version": "1ce4f5e89c0c8ae126d3ef6b64e4eecd80c865435037c9be5c899d93a2b5d64e",
+    "severity": "P0",
+    "enabled": true,
+    "predicates": {
+      "review_status": "synthetic_only",
+      "implementation_sha256": "4a93c8df462283885721c44b9f762a1570cb7a8b181e1310e66ede342d0bb4f6",
+      "implementation": "find_emergency_rules",
+      "red_flag_fields": [],
+      "confirmed_text_patterns": []
+    }
+  },
+  {
+    "code": "RF_DYSPNEA_REST",
+    "version": "e3d0d9b1dceaa285959ddd0fe30850fd08430670f20c01934d04704936a3322b",
+    "severity": "P0",
+    "enabled": true,
+    "predicates": {
+      "review_status": "synthetic_only",
+      "implementation_sha256": "4a93c8df462283885721c44b9f762a1570cb7a8b181e1310e66ede342d0bb4f6",
+      "implementation": "find_emergency_rules",
+      "red_flag_fields": [
+        "dyspnea_rest"
+      ],
+      "confirmed_text_patterns": [
+        "одышк\\w*\\s+в\\s+покое",
+        "(?:тяжело|трудно)\\s+дышать\\s+в\\s+покое"
+      ]
+    }
+  },
+  {
+    "code": "RF_FAST",
+    "version": "37c3681c0f34d671beddc634dc980dc97b1b650376b68a6f6ba170b8b3f9c01c",
+    "severity": "P0",
+    "enabled": true,
+    "predicates": {
+      "review_status": "synthetic_only",
+      "implementation_sha256": "4a93c8df462283885721c44b9f762a1570cb7a8b181e1310e66ede342d0bb4f6",
+      "implementation": "find_emergency_rules",
+      "red_flag_fields": [
+        "facial_asymmetry",
+        "arm_weakness",
+        "speech_difficulty"
+      ],
+      "confirmed_text_patterns": [
+        "перекос\\w*\\s+лиц\\w*",
+        "асимметрия\\s+лица",
+        "невнятн\\w*\\s+реч\\w*",
+        "нарушени\\w*\\s+реч\\w*",
+        "не\\s+могу\\s+поднять\\s+руку",
+        "слабость\\s+в\\s+руке"
+      ]
+    }
+  },
+  {
+    "code": "RF_HEAD_INJURY_LOC",
+    "version": "001691af3be41f9b85c690dd17f93d80eef1ce6b51fbea8bf335b7616b21b79d",
+    "severity": "P0",
+    "enabled": true,
+    "predicates": {
+      "review_status": "synthetic_only",
+      "implementation_sha256": "4a93c8df462283885721c44b9f762a1570cb7a8b181e1310e66ede342d0bb4f6",
+      "implementation": "find_emergency_rules",
+      "red_flag_fields": [
+        "head_injury_with_loc"
+      ],
+      "confirmed_text_patterns": [
+        "травма\\s+головы\\s+с\\s+потер\\w*\\s+сознани\\w*",
+        "удар\\w*\\s+голов\\w*\\s+и\\s+потер\\w*\\s+сознани\\w*"
+      ]
+    }
+  },
+  {
+    "code": "RF_LOSS_CONSCIOUSNESS",
+    "version": "773c815360b13f3bbeb0afc0a3b561ae2f317aaacb00c464795be33965ca0eb8",
+    "severity": "P0",
+    "enabled": true,
+    "predicates": {
+      "review_status": "synthetic_only",
+      "implementation_sha256": "4a93c8df462283885721c44b9f762a1570cb7a8b181e1310e66ede342d0bb4f6",
+      "implementation": "find_emergency_rules",
+      "red_flag_fields": [
+        "loss_of_consciousness"
+      ],
+      "confirmed_text_patterns": [
+        "потер\\w*\\s+сознани\\w*",
+        "теря\\w*\\s+сознани\\w*",
+        "без\\s+сознания",
+        "обморок"
+      ]
+    }
+  },
+  {
+    "code": "RF_SEIZURE",
+    "version": "2b09521bdbeb51257efa2b5d03b2cd932c89bfb8871db97d0a3b46ac048fdfdd",
+    "severity": "P0",
+    "enabled": true,
+    "predicates": {
+      "review_status": "synthetic_only",
+      "implementation_sha256": "4a93c8df462283885721c44b9f762a1570cb7a8b181e1310e66ede342d0bb4f6",
+      "implementation": "find_emergency_rules",
+      "red_flag_fields": [
+        "seizure"
+      ],
+      "confirmed_text_patterns": [
+        "судорог\\w*",
+        "судорожн\\w*\\s+припадок"
+      ]
+    }
+  }
+]
