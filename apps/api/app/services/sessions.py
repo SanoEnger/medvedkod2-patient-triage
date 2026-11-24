@@ -202,9 +202,9 @@ class SessionService:
                 if survey.rule_codes:
                     survey.status = SurveyStatus.EMERGENCY_STOP
                     survey.result = self._triage(survey).model_dump()
-                response = self._serialize(survey)
-                payload_hash, _ = survey.idempotency[key]
-                survey.idempotency[key] = (payload_hash, response.model_dump(mode="json"))
+                # Keep the ordinary accepted snapshot identical for concurrent retries.
+                # An emergency always overrides that snapshot, including on retries.
+                return self._serialize(survey) if survey.status == SurveyStatus.EMERGENCY_STOP else response
             return self._serialize(survey)
 
     async def _answer(self, session_id: UUID, owner_id: str, request: AnswerRequest) -> tuple[SessionResponse, int | None]:

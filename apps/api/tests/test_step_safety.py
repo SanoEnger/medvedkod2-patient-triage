@@ -19,6 +19,14 @@ STEPS = [
 ]
 
 
+def test_migration_seed_matches_current_safety_implementation():
+    from pathlib import Path
+    from app.db.safety_catalog import runtime_rules
+
+    seed = Path(__file__).parents[1] / "alembic/seeds/20261124_06_safety_rules.json"
+    assert json.loads(seed.read_text(encoding="utf-8")) == list(runtime_rules())
+
+
 class SemanticProvider:
     def __init__(self, status="present", code="chest_pain"):
         self.calls = []
