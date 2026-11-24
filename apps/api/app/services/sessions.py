@@ -25,7 +25,7 @@ from app.schemas.survey import (
     SurveyStatus,
     TriageResponse,
 )
-from app.services.safety import find_emergency_rules
+from app.services.safety import answer_text, find_emergency_rules
 
 EMERGENCY_MESSAGE = "Вызовите скорую помощь (103/112). Не ждите окончания опроса."
 DISCLAIMER = (
@@ -182,30 +182,30 @@ class SessionService:
             return self._serialize(survey)
 
     async def answer(self, session_id: UUID, owner_id: str, request: AnswerRequest) -> SessionResponse:
-        """Run safety first; enrich outside the repository lock, without changing urgency.
+        """Run raw safety first, then check model evidence before returning the next step.
 
-        Optimistic revision check discards late results after back/edit/delete.
+        Accepted-answer checks discard late results after back/edit/delete.
         Idempotent retries do not replay the provider request.
         """
         response, revision = await self._answer(session_id, owner_id, request)
         if revision is None or response.emergency or self._extractor is None:
             return response
-        field = {"primary_complaint": "text", "symptom_details": "additional_text"}.get(request.question_key)
-        text = request.value.get(field, "") if field else ""
-        if not isinstance(text, str) or not text.strip():
+        text = answer_text(request.question_key, self._validate(request.question_key, request.value))
+        if not text:
             return response
         extraction = await self._extractor.extract(text)
         async with self._store.open(session_id, owner_id) as survey:
-            if survey.revision == revision and survey.status != SurveyStatus.EMERGENCY_STOP:
+            key = str(request.idempotency_key)
+            if key in survey.idempotency and survey.answers.get(request.question_key) == self._validate(request.question_key, request.value):
                 survey.nlp[request.question_key] = extraction
-                survey.rule_codes = find_emergency_rules(survey.answers)
+                survey.rule_codes = find_emergency_rules(survey.answers, survey.nlp)
                 if survey.rule_codes:
                     survey.status = SurveyStatus.EMERGENCY_STOP
                     survey.result = self._triage(survey).model_dump()
-                # The accepted-answer snapshot is immutable for idempotency,
-                # including retries from other workers during enrichment.
-                # GET exposes the latest persisted NLP result.
-        return response
+                response = self._serialize(survey)
+                payload_hash, _ = survey.idempotency[key]
+                survey.idempotency[key] = (payload_hash, response.model_dump(mode="json"))
+            return self._serialize(survey)
 
     async def _answer(self, session_id: UUID, owner_id: str, request: AnswerRequest) -> tuple[SessionResponse, int | None]:
         async with self._store.open(session_id, owner_id) as survey:
@@ -218,7 +218,8 @@ class SessionService:
                 previous_hash, previous_response = survey.idempotency[key]
                 if previous_hash != payload_hash:
                     raise HTTPException(status_code=409, detail="idempotency_conflict")
-                return SessionResponse.model_validate(previous_response), None
+                return (self._serialize(survey) if survey.status == SurveyStatus.EMERGENCY_STOP
+                        else SessionResponse.model_validate(previous_response)), None
             if survey.status != SurveyStatus.COLLECTING:
                 raise HTTPException(status_code=409, detail="session_not_collecting")
             expected = QUESTIONS[len(survey.answers)]
@@ -226,7 +227,7 @@ class SessionService:
                 raise HTTPException(status_code=409, detail="unexpected_question")
             survey.answers[expected] = self._validate(expected, request.value)
             survey.revision += 1
-            survey.rule_codes = find_emergency_rules(survey.answers)
+            survey.rule_codes = find_emergency_rules(survey.answers, survey.nlp)
             if survey.rule_codes:
                 survey.status = SurveyStatus.EMERGENCY_STOP
                 survey.result = self._triage(survey).model_dump()
@@ -252,7 +253,7 @@ class SessionService:
             # Prior idempotency responses must never resurrect outdated triage results.
             survey.idempotency.clear()
             survey.result = None
-            survey.rule_codes = find_emergency_rules(survey.answers)
+            survey.rule_codes = find_emergency_rules(survey.answers, survey.nlp)
             survey.status = SurveyStatus.COLLECTING
             return self._serialize(survey)
 
@@ -260,7 +261,7 @@ class SessionService:
         async with self._store.open(session_id, owner_id) as survey:
             if survey.status == SurveyStatus.COMPLETED and survey.result and survey.result.get("analysis_source"):
                 return TriageResponse.model_validate(survey.result)
-            survey.rule_codes = find_emergency_rules(survey.answers)
+            survey.rule_codes = find_emergency_rules(survey.answers, survey.nlp)
             if survey.rule_codes:
                 survey.status = SurveyStatus.EMERGENCY_STOP
             result = self._triage(survey)

@@ -1,7 +1,9 @@
-"""Deterministic P0 rules: evaluate raw answers independently from any LLM."""
+"""Raw-answer P0 rules plus grounded, confirmed model symptom evidence."""
 
 import re
 from typing import Any
+
+from app.integrations.groq.schemas import ExtractionResult
 
 # Deliberately limited synthetic-case dictionary; not an approved clinical protocol.
 _RULE_FIELDS = {
@@ -31,7 +33,7 @@ _PATTERNS = {
 }
 
 _NEGATION_RE = re.compile(r"(?:^|\s)(?:нет|не|без|отрицаю|отсутствует)\s*$", re.I)
-_UNCERTAIN_RE = re.compile(r"\b(?:если|возможно|кажется|раньше|когда-то|гипотетически|представим)\b", re.I)
+_UNCERTAIN_RE = re.compile(r"\b(?:если|возможно|кажется|раньше|когда-то|гипотетически|представим|в прошлом|в детстве|у мамы|у папы|у отца|у матери)\b", re.I)
 
 
 def _match_confirmed(pattern: str, text: str) -> bool:
@@ -47,8 +49,21 @@ def _match_confirmed(pattern: str, text: str) -> bool:
     return False
 
 
-def find_emergency_rules(answers: dict[str, dict[str, Any]]) -> list[str]:
-    """Return independently verified P0 codes, no LLM or treatment guidance."""
+def answer_text(question: str, value: dict[str, Any]) -> str:
+    fields = {
+        "primary_complaint": ("text",),
+        "symptom_details": ("location", "duration", "additional_text"),
+        "medical_history": tuple(value),
+    }.get(question, ())
+    return "\n".join(
+        f"{field}: {item}" for field in fields
+        for item in (value.get(field, []) if isinstance(value.get(field), list) else [value.get(field, "")])
+        if isinstance(item, str) and item.strip()
+    )
+
+
+def find_emergency_rules(answers: dict[str, dict[str, Any]], nlp: dict[str, ExtractionResult] | None = None) -> list[str]:
+    """Preserve raw-answer rules and add confirmed model flags, never treatment guidance."""
     matched: set[str] = set()
     flags = answers.get("red_flags", {})
     for field, code in _RULE_FIELDS.items():
@@ -61,7 +76,7 @@ def find_emergency_rules(answers: dict[str, dict[str, Any]]) -> list[str]:
     if age is not None and age < 18 and temp is not None and temp > 39.5:
         matched.add("RF_CHILD_FEVER_39_5")
 
-    texts = [answers.get("primary_complaint", {}).get("text", ""), answers.get("symptom_details", {}).get("additional_text", "")]
+    texts = [answer_text(question, value) for question, value in answers.items()]
     for text in texts:
         if not isinstance(text, str):
             continue
@@ -79,4 +94,21 @@ def find_emergency_rules(answers: dict[str, dict[str, Any]]) -> list[str]:
             if fever and float(fever.group(1).replace(",", ".")) > 39.5:
                 matched.add("RF_CHILD_FEVER_39_5")
 
+    model_rules = {**_RULE_FIELDS, "throat_swelling": "RF_ANAPHYLAXIS"}
+    for question, extraction in (nlp or {}).items():
+        if extraction.source != "groq":
+            continue
+        text = answer_text(question, answers.get(question, {}))
+        for symptom in extraction.symptoms:
+            if symptom.status != "present" or symptom.evidence not in text:
+                continue
+            if not _match_confirmed(re.escape(symptom.evidence), text) or _UNCERTAIN_RE.search(symptom.evidence):
+                continue
+            if any(other.code == symptom.code and other.status != "present" and
+                   (other.evidence in symptom.evidence or symptom.evidence in other.evidence)
+                   for other in extraction.symptoms):
+                continue
+            code = model_rules.get(symptom.code)
+            if code:
+                matched.add(code)
     return sorted(matched)
