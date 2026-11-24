@@ -94,6 +94,40 @@ def test_llm_cannot_remove_local_evidence():
     assert any(s.code == "chest_pain" and s.status == "present" for s in result.symptoms)
 
 
+def test_case_changes_are_restored_to_the_original_source_quote():
+    text = "За грудиной сжимает и давит прямо сейчас"
+    result = extract(text, output([{
+        "code": "chest_pain", "evidence": text.lower(), "status": "present",
+        "location": "за грудиной", "duration": "ПРЯМО СЕЙЧАС",
+    }]))
+    assert result.source == "groq"
+    symptom = result.symptoms[0]
+    assert symptom.evidence == text
+    assert symptom.location == "За грудиной"
+    assert symptom.duration == "прямо сейчас"
+
+
+def test_invented_optional_details_cannot_discard_a_grounded_critical_symptom():
+    text = "За грудиной сжимает прямо сейчас"
+    result = extract(text, output([{
+        "code": "chest_pain", "evidence": text, "status": "present",
+        "location": "грудная клетка", "duration": "три часа",
+    }]))
+    assert result.source == "groq"
+    assert result.symptoms[0].location is None
+    assert result.symptoms[0].duration is None
+    from app.services.safety import find_emergency_rules
+    assert find_emergency_rules({"primary_complaint": {"text": text}}, {"primary_complaint": result}) == ["RF_CHEST_PAIN"]
+
+
+def test_case_matching_does_not_accept_unstated_symptoms():
+    result = extract("За грудиной сжимает", output([{
+        "code": "throat_swelling", "evidence": "ОТЕКАЕТ ГОРЛО", "status": "present",
+    }]))
+    assert result.source == "fallback"
+    assert result.fallback_reason == "invalid_response"
+
+
 def test_generic_breathing_not_rest():
     assert {s.code for s in extract_local("Тяжело дышать").symptoms} == {"dyspnea"}
 
