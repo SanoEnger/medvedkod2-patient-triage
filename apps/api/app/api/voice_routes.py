@@ -1,8 +1,11 @@
+import asyncio
+import math
 from functools import lru_cache
 from io import BytesIO
 from itertools import chain
 from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
@@ -16,6 +19,35 @@ SAMPLE_RATE = 16000
 MAX_AUDIO_SAMPLES = SAMPLE_RATE * 35
 
 router = APIRouter()
+
+
+async def recognize_groq(settings, audio: bytearray, content_type: str) -> str:
+    extension = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "mp4"}[content_type]
+    try:
+        async with asyncio.timeout(30):
+            async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+                response = await client.post(
+                    "https://api.groq.com/openai/v1/audio/transcriptions",
+                    headers={"Authorization": "Bearer " + settings.groq_api_key},
+                    files={"file": ("recording." + extension, bytes(audio), content_type)},
+                    data={"model": settings.groq_transcription_model, "language": "ru", "response_format": "verbose_json"},
+                )
+        if response.status_code == 429:
+            raise HTTPException(status_code=429, detail="voice_busy")
+        if response.status_code in (400, 413, 415, 422):
+            raise HTTPException(status_code=422, detail="invalid_audio")
+        response.raise_for_status()
+        payload = response.json()
+        duration = float(payload["duration"])
+        text = payload["text"]
+        if not math.isfinite(duration) or duration < 0 or not isinstance(text, str):
+            raise ValueError("invalid_transcription")
+        if duration > 35:
+            raise HTTPException(status_code=413, detail="audio_too_long")
+        return text.strip()
+    except (httpx.HTTPError, TimeoutError, ValueError, KeyError, TypeError) as error:
+        event("voice.failed", provider="groq", error_type=type(error).__name__)
+        raise HTTPException(status_code=503, detail="voice_unavailable") from None
 
 
 @lru_cache(maxsize=1)
@@ -59,9 +91,13 @@ async def transcribe(request: Request, owner: str = Depends(get_principal)) -> d
         raise HTTPException(status_code=415, detail="unsupported_audio_type")
 
     await request.app.state.launch_limiter.check("voice:" + owner)
-    model_path = request.app.state.settings.whisper_model_path
+    settings = request.app.state.settings
+    model_path = settings.whisper_model_path
     path = Path(model_path)
-    if not model_path or not all((path / name).is_file() for name in ("model.bin", "config.json", "tokenizer.json")):
+    if settings.voice_provider == "groq":
+        if not settings.groq_api_key:
+            raise HTTPException(status_code=503, detail="voice_unavailable")
+    elif not model_path or not all((path / name).is_file() for name in ("model.bin", "config.json", "tokenizer.json")):
         raise HTTPException(status_code=503, detail="voice_unavailable")
 
     audio = bytearray()
@@ -77,7 +113,10 @@ async def transcribe(request: Request, owner: str = Depends(get_principal)) -> d
         raise HTTPException(status_code=429, detail="voice_busy")
     async with lock:
         try:
-            text = await run_in_threadpool(recognize, str(path.resolve()), audio, audio_format)
+            if settings.voice_provider == "groq":
+                text = await recognize_groq(settings, audio, content_type)
+            else:
+                text = await run_in_threadpool(recognize, str(path.resolve()), audio, audio_format)
         except (ImportError, OSError, RuntimeError, ValueError) as error:
             event("voice.failed", error_type=type(error).__name__)
             raise HTTPException(status_code=503, detail="voice_unavailable") from None

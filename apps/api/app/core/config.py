@@ -26,6 +26,9 @@ class Settings:
     core_timeout_seconds: float = 6.0
     nlp_mode: str = "mock"
     whisper_model_path: str = ""
+    voice_provider: str = "local"
+    groq_transcription_model: str = "whisper-large-v3-turbo"
+    groq_api_key: str = field(default="", repr=False)
     database_url: str = field(default="", repr=False)
     database_ssl_ca_file: str = ""
     data_encryption_key_file: str = field(default="", repr=False)
@@ -51,6 +54,9 @@ class Settings:
             core_timeout_seconds=float(os.getenv("CORE_TIMEOUT_SECONDS", "6")),
             nlp_mode=os.getenv("NLP_MODE", "mock"),
             whisper_model_path=os.getenv("WHISPER_MODEL_PATH", ""),
+            voice_provider=os.getenv("VOICE_PROVIDER", "local"),
+            groq_transcription_model=os.getenv("GROQ_TRANSCRIPTION_MODEL", "whisper-large-v3-turbo"),
+            groq_api_key=os.getenv("GROQ_API_KEY", ""),
             database_url=os.getenv("DATABASE_URL", ""),
             database_ssl_ca_file=os.getenv("DATABASE_SSL_CA_FILE", ""),
             data_encryption_key_file=os.getenv("DATA_ENCRYPTION_KEY_FILE", ""),
@@ -61,6 +67,8 @@ class Settings:
         )
 
     def validate(self) -> None:
+        if self.voice_provider not in ("local", "groq"):
+            raise ValueError("VOICE_PROVIDER must be local or groq")
         if self.nlp_mode not in ("mock", "live"):
             raise ValueError("NLP_MODE must be mock or live")
         if not self.session_signing_key or len(self.session_signing_key) < 32:
