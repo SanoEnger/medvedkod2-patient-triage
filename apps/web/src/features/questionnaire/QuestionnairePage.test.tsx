@@ -176,6 +176,40 @@ describe('questionnaire UI', () => {
     expect(send.mock.calls[3][1].value).toMatchObject({ chest_pain: true, bleeding: null })
   })
 
+  test.each(['primary_complaint', 'symptom_details', 'medical_history'] as const)(
+    'a model emergency from %s immediately opens the stop screen without final analysis', async (target) => {
+      const client = createMockClient()
+      const original = client.answer
+      const triage = vi.spyOn(client, 'triage')
+      vi.spyOn(client, 'answer').mockImplementation(async (...args) => {
+        const response = await original(...args)
+        return args[1].question_key === target
+          ? { ...response, emergency: true, status: 'EMERGENCY_STOP', state: 'EMERGENCY_STOP', current_question: null, next_question: null, result: demoResult('emergency') }
+          : response
+      })
+      const { user } = mount(client)
+      await consent(user)
+      await user.type(screen.getByLabelText('Что беспокоит — своими словами'), 'Сжимает за грудиной')
+      await primary(user)
+      if (target !== 'primary_complaint') {
+        await user.click(screen.getByRole('button', { name: 'Продолжить' }))
+        await user.type(screen.getByLabelText('Как давно появились симптомы?'), 'Сейчас')
+        await user.click(screen.getByRole('button', { name: 'Продолжить' }))
+      }
+      if (target === 'medical_history') {
+        await user.click(screen.getByRole('button', { name: 'Ничего из перечисленного' }))
+        await user.click(screen.getByRole('button', { name: 'Продолжить' }))
+        await user.type(screen.getByLabelText('Госпитализации за последний год'), 'Сжимает за грудиной сейчас')
+        await user.click(screen.getByRole('button', { name: 'Завершить опрос и посмотреть итог' }))
+      }
+      await screen.findByRole('heading', { name: 'Вызовите скорую помощь' })
+      expect(screen.getByRole('link', { name: 'Позвонить 103' })).toBeVisible()
+      expect(screen.queryByRole('button', { name: 'Продолжить' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Результат опроса' })).not.toBeInTheDocument()
+      expect(triage).not.toHaveBeenCalled()
+    },
+  )
+
   test('readability preserves entered values and sends no request', async () => {
     const client = createMockClient()
     const send = vi.spyOn(client, 'answer')

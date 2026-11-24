@@ -8,7 +8,8 @@ SymptomCode = Literal[
     "chest_pain", "dyspnea", "dyspnea_rest", "loss_of_consciousness",
     "seizure", "bleeding", "abdominal_pain", "headache", "fever",
     "head_injury", "facial_asymmetry", "speech_difficulty", "arm_weakness",
-    "throat_swelling", "rash", "cough", "nausea",
+    "throat_swelling", "rash", "cough", "nausea", "anaphylaxis",
+    "acute_abdominal_pain", "head_injury_with_loc",
 ]
 ShortText = Annotated[str, Field(min_length=1, max_length=200)]
 
