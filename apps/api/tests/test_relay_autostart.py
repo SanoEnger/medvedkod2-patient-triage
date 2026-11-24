@@ -40,3 +40,27 @@ def test_arbitrary_tunnel_destination_never_reaches_vercel(monkeypatch):
     monkeypatch.setattr(supervisor, 'run_cli', lambda *args: pytest.fail('must not update Vercel'))
     with pytest.raises(ValueError):
         supervisor.publish_url('synthetic-cli', 'https://untrusted.example')
+
+
+def test_live_but_unreachable_tunnel_is_replaced_after_three_failures(monkeypatch):
+    stopped = []
+    monkeypatch.setattr(supervisor, 'reachable', lambda url: False)
+    monkeypatch.setattr(supervisor, 'log', lambda message: None)
+    monkeypatch.setattr(supervisor, 'stop_tunnel', stopped.append)
+    state = {'api': 100, 'tunnel': 200}
+    failures = 0
+    for _ in range(2):
+        failures = supervisor.check_tunnel(state, 'https://expired.trycloudflare.com', failures)
+        assert state['tunnel'] == 200
+        assert stopped == []
+    supervisor.check_tunnel(state, 'https://expired.trycloudflare.com', failures)
+    assert stopped == [200]
+    assert state == {'api': 100}
+
+
+def test_reconnected_tunnel_resets_failure_count_without_restart(monkeypatch):
+    monkeypatch.setattr(supervisor, 'reachable', lambda url: True)
+    monkeypatch.setattr(supervisor, 'stop_tunnel', lambda pid: pytest.fail('healthy tunnel must not restart'))
+    state = {'tunnel': 200}
+    assert supervisor.check_tunnel(state, 'https://healthy.trycloudflare.com', 2) == 0
+    assert state['tunnel'] == 200

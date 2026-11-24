@@ -49,6 +49,41 @@ def reachable(base):
         return False
 
 
+def stop_tunnel(pid):
+    """Terminate only our cloudflared executable, never an unrelated reused PID."""
+    kernel = ctypes.windll.kernel32
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+    kernel.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.OpenProcess(0x1001, False, pid)
+    if not handle:
+        return
+    try:
+        buffer = ctypes.create_unicode_buffer(32768)
+        size = wintypes.DWORD(len(buffer))
+        expected = str(ROOT / '.local/bin/cloudflared.exe')
+        if not kernel.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)) or os.path.normcase(buffer.value) != os.path.normcase(expected):
+            raise RuntimeError('tunnel_process_identity_mismatch')
+        if not kernel.TerminateProcess(handle, 0):
+            raise RuntimeError('tunnel_stop_failed')
+    finally:
+        kernel.CloseHandle(handle)
+
+
+def check_tunnel(state, url, failures):
+    if reachable(url):
+        return 0
+    failures += 1
+    log('HTTPS tunnel unavailable (' + str(failures) + '/3)')
+    if failures >= 3:
+        stop_tunnel(state['tunnel'])
+        state.pop('tunnel')
+        log('Unresponsive tunnel stopped; creating a replacement')
+    return failures
+
+
 def spawn(args, filename, env=None):
     with (RUNTIME / filename).open('ab') as output:
         return subprocess.Popen(args, cwd=ROOT / 'apps/api', env=env,
@@ -105,6 +140,7 @@ def main():
         url_file = RUNTIME / 'url.txt'
         url = url_file.read_text().strip() if url_file.exists() else ''
         log('Supervisor started')
+        tunnel_failures = 0
         while True:
             try:
                 if not reachable('http://127.0.0.1:8765'):
@@ -124,6 +160,7 @@ def main():
                     state['tunnel'] = child.pid
                     state_file.write_text(json.dumps(state), encoding='utf-8')
                     url = ''
+                    tunnel_failures = 0
                     log('HTTPS tunnel process started')
                 if not url:
                     matches = URL_PATTERN.findall((RUNTIME / 'tunnel-autostart.log').read_text(errors='replace'))
@@ -132,8 +169,13 @@ def main():
                         url_file.write_text(url, encoding='utf-8')
                 published = RUNTIME / 'published-url.txt'
                 previous = published.read_text().strip() if published.exists() else ''
-                if url and url != previous and reachable(url):
-                    publish_url(cli, url)
+                if url:
+                    tunnel_failures = check_tunnel(state, url, tunnel_failures)
+                    if 'tunnel' not in state:
+                        state_file.write_text(json.dumps(state), encoding='utf-8')
+                        url = ''
+                    elif tunnel_failures == 0 and url != previous:
+                        publish_url(cli, url)
             except Exception as error:
                 log('Retrying after ' + type(error).__name__)
             time.sleep(30)
