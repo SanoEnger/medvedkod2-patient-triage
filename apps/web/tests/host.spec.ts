@@ -1,5 +1,20 @@
 import { expect, test } from '@playwright/test'
 
+test('host login survives a slow API startup without falling back to an error', async ({ page }) => {
+  let calls = 0
+  await page.route('**/api/v1/auth/launch', async (route) => {
+    calls++
+    await new Promise((resolve) => setTimeout(resolve, 12000))
+    await route.fulfill({ json: { access_token: 'synthetic-delayed-session', token_type: 'bearer', expires_in: 3600 } })
+  })
+  await page.goto('/?token=synthetic-delayed-jwt')
+  await expect(page.getByText('MAX', { exact: true })).toBeVisible({ timeout: 20000 })
+  await expect(page.getByRole('heading', { name: 'Не удалось подтвердить вход' })).toHaveCount(0)
+  expect(calls).toBe(1)
+  expect(page.url()).not.toContain('token=')
+  expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0)
+})
+
 test('host JWT overrides demo, is exchanged once and removed from URL', async ({ page }) => {
   let calls = 0
   await page.route('**/api/v1/auth/launch', async (route) => {

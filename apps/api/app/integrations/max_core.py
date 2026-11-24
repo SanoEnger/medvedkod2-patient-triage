@@ -13,19 +13,27 @@ class MaxCoreClient:
 
     async def resolve_user_id(self, user_token: str) -> str:
         """Ask organizer core to authenticate a 5-minute host JWT."""
-        if not self._settings.core_service_token:
+        if not self._settings.core_service_token and not self._settings.core_relay_url:
             raise HTTPException(status_code=503, detail="host_auth_not_configured")
         if not user_token or len(user_token) > 6000:
             raise HTTPException(status_code=401, detail="invalid_host_token")
         own_client = self._client is None
         client = self._client or httpx.AsyncClient(timeout=self._settings.core_timeout_seconds)
         try:
-            resp = await client.get(
-                self._settings.core_url + "/api/v3/users/user-for-external-service",
-                params={"token": user_token},
-                headers={"Authorization": "Bearer " + self._settings.core_service_token},
-                timeout=self._settings.core_timeout_seconds,
-            )
+            if self._settings.core_relay_url:
+                resp = await client.post(
+                    self._settings.core_relay_url + "/resolve",
+                    json={"token": user_token},
+                    headers={"Authorization": "Bearer " + self._settings.core_relay_token},
+                    timeout=self._settings.core_timeout_seconds,
+                )
+            else:
+                resp = await client.get(
+                    self._settings.core_url + "/api/v3/users/user-for-external-service",
+                    params={"token": user_token},
+                    headers={"Authorization": "Bearer " + self._settings.core_service_token},
+                    timeout=self._settings.core_timeout_seconds,
+                )
         except httpx.RequestError:
             raise HTTPException(status_code=503, detail="host_auth_unavailable") from None
         finally:

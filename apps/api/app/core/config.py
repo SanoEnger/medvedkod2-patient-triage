@@ -1,8 +1,10 @@
 """Backend environment settings. No secrets are placed in source control."""
 
 import os
-from app.environment import load_local_environment
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
+
+from app.environment import load_local_environment
 
 
 def _csv(value: str) -> tuple[str, ...]:
@@ -13,6 +15,8 @@ def _csv(value: str) -> tuple[str, ...]:
 class Settings:
     core_url: str = "https://tm-test-yakut.hostco.ru"
     core_service_token: str = ""
+    core_relay_url: str = ""
+    core_relay_token: str = field(default="", repr=False)
     session_signing_key: str = ""
     demo_mode: bool = False
     cors_origins: tuple[str, ...] = field(default_factory=tuple)
@@ -35,6 +39,8 @@ class Settings:
         return cls(
             core_url=os.getenv("CORE_URL", cls.core_url).rstrip("/"),
             core_service_token=os.getenv("CORE_SERVICE_TOKEN", ""),
+            core_relay_url=os.getenv("CORE_RELAY_URL", "").rstrip("/"),
+            core_relay_token=os.getenv("CORE_RELAY_TOKEN", ""),
             session_signing_key=os.getenv("SESSION_SIGNING_KEY", ""),
             demo_mode=os.getenv("DEMO_MODE", "false").lower() in ("1", "true", "yes"),
             cors_origins=_csv(os.getenv("CORS_ORIGINS", "")),
@@ -63,6 +69,12 @@ class Settings:
             raise ValueError("Invalid SURVEY_TTL_SECONDS")
         if not self.core_url.startswith("https://"):
             raise ValueError("CORE_URL must be HTTPS")
+        if self.core_relay_url:
+            relay = urlsplit(self.core_relay_url)
+            if relay.scheme != "https" or not relay.hostname or relay.username or relay.password or relay.query or relay.fragment:
+                raise ValueError("CORE_RELAY_URL must be an HTTPS URL without credentials or query")
+            if len(self.core_relay_token) < 32:
+                raise ValueError("CORE_RELAY_TOKEN must contain at least 32 characters")
         if self.core_timeout_seconds <= 0 or self.core_timeout_seconds > 8:
             raise ValueError("Invalid CORE_TIMEOUT_SECONDS")
         for origin in self.cors_origins:

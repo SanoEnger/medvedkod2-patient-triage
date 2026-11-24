@@ -39,7 +39,8 @@ export function createHostAdapter(): MaxHostAdapter | undefined {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ mode: 'host', host_token: credential }),
             credentials: 'omit', cache: 'no-store', redirect: 'error',
-            signal: AbortSignal.timeout(10000), referrerPolicy: 'no-referrer',
+            // Include API cold-start and network time, not only Core processing.
+            signal: AbortSignal.timeout(45000), referrerPolicy: 'no-referrer',
           })
         } catch { throw new Error('HOST_AUTH_UNAVAILABLE') }
         if (!response.ok) throw new Error('HOST_AUTH_FAILED')
