@@ -60,7 +60,7 @@ function Workspace({ client }: { client: MedvedClient }) {
   const [availabilityError, setAvailabilityError] = useState(false)
   const [refresh, setRefresh] = useState(0)
   const [resultId, setResultId] = useState<string>()
-  const [clinicTarget, setClinicTarget] = useState<{ from: 'survey' | 'result'; specialty: string; group?: PatientGroup }>()
+  const [clinicTarget, setClinicTarget] = useState<{ from: 'survey' | 'result' | 'chat'; specialty: string; group?: PatientGroup }>()
   const [historyFilter, setHistoryFilter] = useState<ChatKind>()
   const [chatTarget, setChatTarget] = useState<{ questionnaireId?: string; saved?: ChatSummary; key: string } | null>(null)
   const focusAfterNavigation = useRef(false)
@@ -156,6 +156,7 @@ function Workspace({ client }: { client: MedvedClient }) {
           else startSurvey()
         }}
         onNew={() => openChat(undefined, true)}
+        onClinics={(specialty) => { setClinicTarget({ from: 'chat', specialty }); navigate('clinics') }}
         onDeleted={(id) => { chatDeleted(id); navigate('history') }} />
     </div>}
   </>

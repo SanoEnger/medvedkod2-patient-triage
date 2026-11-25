@@ -41,6 +41,7 @@
 .clinic-card h2 { margin-top: 0; }
 .clinic-card--selected { outline: 3px solid var(--accent); outline-offset: -3px; }
 .clinic-results { display: grid; gap: 1rem; align-items: start; }
+.clinic-map-viewport { position: relative; }
 .clinic-map-canvas {
   width: 100%;
   height: clamp(18rem, 45vh, 32rem);
@@ -49,6 +50,20 @@
   z-index: 0;
 }
 .clinic-map .leaflet-control-attribution { font-size: var(--font-hint); }
+.clinic-map-target {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 50%;
+  width: 1.5rem;
+  height: 1.5rem;
+  transform: translate(-50%, -50%);
+  border: 3px solid var(--heading);
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--heading) 2px, transparent 3px);
+  box-shadow: 0 0 0 2px white;
+  pointer-events: none;
+}
 .clinic-map-controls { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }
 .clinic-map-logo { position: absolute; z-index: 1000; bottom: 0; right: 0; display: flex; }
 .clinic-map-logo img { width: 66px; height: 36px; }

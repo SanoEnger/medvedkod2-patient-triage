@@ -69,7 +69,8 @@ export function parseChat(value: unknown): Conversation {
     || value.messages.some((entry) => !object(entry) || !uuid(entry.id) || !['user', 'assistant'].includes(String(entry.role))
       || typeof entry.text !== 'string' || !entry.text || entry.text.length > 6000
       || typeof entry.created_at !== 'string' || !Number.isFinite(Date.parse(entry.created_at))
-      || typeof entry.emergency !== 'boolean' || !(entry.client_message_id == null || uuid(entry.client_message_id)))) {
+      || typeof entry.emergency !== 'boolean' || !(entry.client_message_id == null || uuid(entry.client_message_id))
+      || !(entry.clinic_specialty === undefined || nullableText(entry.clinic_specialty)))) {
     throw new ApiError(0, emergencyHint(value), true)
   }
   if (value.result !== null) parseTriage(value.result)
@@ -143,16 +144,17 @@ export function createApiClient(mode: 'demo' | 'max', onAuthorizationExpired?: (
   async function call(path: string, method: string, body?: unknown, signal?: AbortSignal) {
     return request(path, method, body, signal, await token())
   }
+  function geocodeResult(value: unknown, limit: number) {
+    if (!object(value) || !Array.isArray(value.candidates) || value.candidates.length > limit || value.candidates.some((candidate) =>
+      !object(candidate) || typeof candidate.city !== 'string' || typeof candidate.label !== 'string'
+      || !Number.isFinite(candidate.lat) || !Number.isFinite(candidate.lon))) throw new ApiError(0, false, true)
+    return { candidates: value.candidates as AddressCandidate[] }
+  }
   const path = (id: string) => '/api/v1/sessions/' + encodeURIComponent(id)
   return {
     clinics: {
-      geocode: async (address, signal) => {
-        const value = await call('/api/v1/clinics/geocode', 'POST', { address }, signal)
-        if (!object(value) || !Array.isArray(value.candidates) || value.candidates.length > 8 || value.candidates.some((candidate) =>
-          !object(candidate) || typeof candidate.city !== 'string' || typeof candidate.label !== 'string'
-          || !Number.isFinite(candidate.lat) || !Number.isFinite(candidate.lon))) throw new ApiError(0, false, true)
-        return { candidates: value.candidates as AddressCandidate[] }
-      },
+      geocode: async (address, signal) => geocodeResult(await call('/api/v1/clinics/geocode', 'POST', { address }, signal), 8),
+      reverseGeocode: async (point, signal) => geocodeResult(await call('/api/v1/clinics/reverse-geocode', 'POST', point, signal), 1),
       search: async (query, signal) => {
         const value = await call('/api/v1/clinics/search', 'POST', query, signal)
         if (!object(value) || !Array.isArray(value.items) || value.items.length > 50 || !Array.isArray(value.insurers)
@@ -162,6 +164,7 @@ export function createApiClient(mode: 'demo' | 'max', onAuthorizationExpired?: (
             || !nullableText(item.website) || !nullableText(item.booking_url) || !nullableText(item.gosuslugi_url)
             || (item.poliklinika45_url !== undefined && !nullableText(item.poliklinika45_url))
             || (item.specialties !== undefined && !strings(item.specialties))
+            || (item.oms_needs_confirmation !== undefined && typeof item.oms_needs_confirmation !== 'boolean')
             || (item.sources !== undefined && (!Array.isArray(item.sources) || item.sources.some((source) =>
               !object(source) || typeof source.name !== 'string' || typeof source.url !== 'string'
               || (source.updated_at !== null && !date(source.updated_at)))))

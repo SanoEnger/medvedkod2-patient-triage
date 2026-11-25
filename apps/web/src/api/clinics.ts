@@ -10,6 +10,7 @@ export type Clinic = Coordinates & {
   website: string | null; booking_url: string | null; gosuslugi_url: string | null; gosuslugi_select_branch: boolean
   poliklinika45_url?: string | null
   demo: boolean; payments: ClinicPayment[]; distance_km: number
+  oms_needs_confirmation?: boolean
   specialties?: string[]; sources?: ClinicSource[]
 }
 export type ClinicSearch = Coordinates & {
@@ -19,5 +20,6 @@ export type ClinicSearch = Coordinates & {
 export type ClinicSearchResult = { items: Clinic[]; insurers: Insurer[] }
 export interface ClinicsClient {
   geocode(address: string, signal: AbortSignal): Promise<{ candidates: AddressCandidate[] }>
+  reverseGeocode(point: Coordinates, signal: AbortSignal): Promise<{ candidates: AddressCandidate[] }>
   search(query: ClinicSearch, signal: AbortSignal): Promise<ClinicSearchResult>
 }

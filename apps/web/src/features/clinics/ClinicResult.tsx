@@ -2,7 +2,6 @@ import type { Clinic } from '../../api/clinics'
 import { Button, Card } from '../../components/ui'
 import { specialties } from './specialties'
 
-const paymentLabels = { oms: 'ОМС', dms: 'ДМС', paid: 'Платно' }
 const kilometers = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 })
 
 function ExternalLink({ url, label, className }: { url: string | null; label: string; className?: string }) {
@@ -20,13 +19,12 @@ function ExternalLink({ url, label, className }: { url: string | null; label: st
 export function ClinicResult({ clinic, paidSearch, selected, onSelect, register }: {
   clinic: Clinic; paidSearch: boolean; selected?: boolean; onSelect?: () => void; register?: (card: HTMLElement | null) => void
 }) {
-  const paymentNotes = [...new Set(clinic.payments.map((payment) =>
-    [paymentLabels[payment.method], specialties[payment.specialty_code], payment.insurer?.name, payment.program]
+  const paymentNotes = [...new Set(clinic.payments.filter((payment) => payment.method !== 'dms').map((payment) =>
+    [payment.method === 'oms' ? 'ОМС' : 'Платно', specialties[payment.specialty_code]]
       .filter(Boolean).join(' · ')))]
   const oms = clinic.payments.some((payment) => payment.method === 'oms')
-  const dms = clinic.payments.some((payment) => payment.method === 'dms')
   const paid = clinic.payments.some((payment) => payment.method === 'paid')
-  const phoneOnly = clinic.kind === 'private' || paidSearch
+  const phoneOnly = clinic.kind === 'private' || paidSearch || (paid && !oms && !clinic.oms_needs_confirmation)
   const gosuslugi = phoneOnly ? null : clinic.gosuslugi_url
   const poliklinika45 = phoneOnly ? null : clinic.poliklinika45_url ?? null
   const namedSpecialties = clinic.specialties?.map((code) => specialties[code]).filter(Boolean) ?? []
@@ -38,9 +36,10 @@ export function ClinicResult({ clinic, paidSearch, selected, onSelect, register 
       <p>{clinic.kind === 'public' ? 'Государственная' : 'Частная'} · {kilometers.format(clinic.distance_km)} км по прямой</p>
       {namedSpecialties.length > 0 && <p>Специалисты · {namedSpecialties.join(', ')}</p>}
       {paymentNotes.length > 0 ? <ul className="clinic-payments">{paymentNotes.map((note) => <li key={note}>{note}</li>)}</ul>
-        : <p>Уточните способы оплаты в клинике.</p>}
+        : clinic.oms_needs_confirmation
+          ? <p>Учреждение участвует в программе ОМС. Уточните условия приёма в этом филиале в регистратуре.</p>
+          : <p>Уточните способы оплаты в клинике.</p>}
       {oms && <p>Уточните условия приёма по ОМС в регистратуре.</p>}
-      {dms && <p>Уточните покрытие у страховой.</p>}
       {paid && <p>Уточните стоимость в клинике.</p>}
       {phoneOnly && <p>Запись по телефону</p>}
       <ul className="clinic-contacts" aria-label={phoneOnly ? 'Телефоны для записи' : 'Контакты'}>

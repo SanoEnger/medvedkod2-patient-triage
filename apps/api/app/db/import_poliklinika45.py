@@ -16,7 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.db.clinic_addresses import address_query, addresses, normalize
-from app.db.clinic_catalog import branches, organizations
+from app.db.clinic_catalog import branches, organizations, portal_institution_page
 from app.db.clinic_sources import CATALOG_IMPORT_LOCK, POLIKLINIKA45, clinic_sources
 from app.db.engine import create_engine
 from app.integrations.poliklinika45 import (
@@ -39,8 +39,12 @@ def organization_key(name: str | None) -> str:
 
 
 def normalized_address(value: str | None):
+    value = value or ""
+    value = re.sub(r"^(Курган,\s*\d+-й)(?=,)", r"\1 микрорайон", value, flags=re.IGNORECASE)
+    value = re.sub(r"(?<=\d),\s*корп\.?\s*([а-я])\s*$", r"\1", value, flags=re.IGNORECASE)
+    value = re.sub(r"\bк\.\s*маркса\b", "Карла Маркса", value, flags=re.IGNORECASE)
     try:
-        identity = address_query(value or "")
+        identity = address_query(value)
     except ValueError:
         return None
     return identity if identity[0] and identity[1] else None
@@ -92,6 +96,10 @@ async def apply_snapshot(db, snapshot: SourceSnapshot, records: list[SourceRecor
     branch_by_id = {branch["id"]: branch for branch in existing}
     by_address = [(branch, normalized_address(branch["address"])) for branch in existing]
     external_organizations = defaultdict(set)
+    for branch in existing:
+        if page := portal_institution_page(branch["booking_url"]):
+            external_id = urlsplit(page).path.rstrip("/").rsplit("/", 1)[-1]
+            external_organizations[external_id].add(branch["organization_id"])
     for row in prior:
         if row["kind"] == "organization" and row["organization_id"]:
             external_organizations[row["external_id"]].add(row["organization_id"])
@@ -162,11 +170,12 @@ async def apply_snapshot(db, snapshot: SourceSnapshot, records: list[SourceRecor
         branch = linked or (matches[0] if len(matches) == 1 else None)
         if not branch:
             facility_kind = record.facility_kind or (org_record.facility_kind if org_record else None)
+            phones = record.phones or (["122"] if facility_kind == "public" else [])
             reason = None
             coordinates = None
             required = {"address": identity, "organization_name": org_name,
                         "organization_external_id": record.organization_external_id,
-                        "phones": record.phones, "facility_kind": facility_kind}
+                        "phones": phones, "facility_kind": facility_kind}
             missing = [name for name, value in required.items() if not value]
             if at_address or len(linked_orgs) > 1:
                 reason = "ambiguous_catalog_match"
@@ -186,7 +195,7 @@ async def apply_snapshot(db, snapshot: SourceSnapshot, records: list[SourceRecor
             org_id = next(iter(linked_orgs), stable_id("p45-org-", record.organization_external_id))
             await db.execute(insert(organizations).values(id=org_id, name=org_name, kind=facility_kind).on_conflict_do_nothing())
             branch = dict(id=stable_id("p45-branch-", record.external_id), organization_id=org_id,
-                          address=record.address, phones=record.phones, source=record.url, website=verified_website(record),
+                          address=record.address, phones=phones, source=record.url, website=verified_website(record),
                           booking_url=None, gosuslugi_confirmed=False, gosuslugi_direct_url=None, demo=False, **coordinates)
             await db.execute(insert(branches).values(**branch).on_conflict_do_nothing())
             branch["name"] = org_name

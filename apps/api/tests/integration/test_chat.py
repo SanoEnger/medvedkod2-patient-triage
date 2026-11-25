@@ -33,6 +33,7 @@ class Agent:
         self.fail = False
         self.context = None
         self.hold = None
+        self.clinic_specialty = None
         self.started = asyncio.Event()
 
     async def reply(self, history, context):
@@ -45,7 +46,7 @@ class Agent:
             self.fail = False
             raise GroqError("network_error")
         assert history[-1]["role"] == "user"
-        return AgentReply(text="Подготовьте вопросы для врача.", emergency=False)
+        return AgentReply(text="Подготовьте вопросы для врача.", emergency=False, clinic_specialty=self.clinic_specialty)
 
 
 @pytest_asyncio.fixture
@@ -124,6 +125,17 @@ async def test_chat_is_encrypted_owner_scoped_and_idempotent(chat_api):
             assert (await other.get(f"/api/v1/chats/{sid}")).status_code == 404
         assert (await client.delete(f"/api/v1/chats/{sid}")).status_code == 204
         assert (await client.get(f"/api/v1/chats/{sid}")).status_code == 404
+
+
+async def test_clinic_referral_is_restored_with_the_assistant_reply(chat_api):
+    connect, agent, _ = chat_api
+    agent.clinic_specialty = "Дерматолог"
+    async with connect() as client:
+        sid = await new_chat(client)
+        response = await client.post(f"/api/v1/chats/{sid}/messages", json=message("К какому врачу обратиться?"))
+        assert response.status_code == 200
+        assert [row["clinic_specialty"] for row in response.json()["messages"]] == [None, None, "Дерматолог"]
+        assert (await client.get(f"/api/v1/chats/{sid}")).json() == response.json()
 
 
 async def test_agent_failure_keeps_one_user_message_for_retry(chat_api):

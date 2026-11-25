@@ -1,9 +1,10 @@
 import re
+from math import cos, radians
 
 import sqlalchemy as sa
 
 from app.db.models import Base
-from app.schemas.clinics import AddressCandidate
+from app.schemas.clinics import AddressCandidate, Coordinates
 
 addresses = sa.Table(
     "clinic_addresses", Base.metadata,
@@ -94,3 +95,16 @@ async def find_addresses(db, street: str, house: str, kind: str) -> list[Address
                         unique.c.house_key, unique.c.osm_id)
               .limit(8))
     return [AddressCandidate(label=row.label, city=CITY, lat=row.lat, lon=row.lon) for row in (await db.execute(ranked))]
+
+
+async def nearest_address(db, point: Coordinates) -> AddressCandidate | None:
+    metres_per_degree = 111_200
+    north = (addresses.c.lat - point.lat) * metres_per_degree
+    east = (addresses.c.lon - point.lon) * (metres_per_degree * cos(radians(point.lat)))
+    distance_squared = north * north + east * east
+    nearest = (sa.select(addresses.c.label, addresses.c.lat, addresses.c.lon)
+               .where(distance_squared <= 250 ** 2)
+               .order_by(distance_squared, addresses.c.osm_id)
+               .limit(1))
+    row = (await db.execute(nearest)).one_or_none()
+    return AddressCandidate(label=row.label, city=CITY, lat=row.lat, lon=row.lon) if row else None

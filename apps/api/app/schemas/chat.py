@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import Field, field_validator
 
-from app.schemas.survey import SessionResponse, StrictModel, TriageResponse
+from app.schemas.survey import ReferralSpecialty, SessionResponse, StrictModel, TriageResponse
 
 ChatKind = Literal["chat", "questionnaire", "questionnaire_result"]
 
@@ -33,6 +33,7 @@ class ChatMessage(StrictModel):
     created_at: str
     emergency: bool = False
     client_message_id: UUID | None = None
+    clinic_specialty: ReferralSpecialty | None = None
 
 
 class ChatResponse(StrictModel):

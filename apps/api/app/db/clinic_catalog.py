@@ -5,7 +5,12 @@ from urllib.parse import urlsplit
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB, insert
 
-from app.db.clinic_sources import CATALOG_IMPORT_LOCK, POLIKLINIKA45, clinic_sources
+from app.db.clinic_sources import (
+    CATALOG_IMPORT_LOCK,
+    POLIKLINIKA45,
+    clinic_sources,
+    oms_participants,
+)
 from app.db.models import Base
 from app.schemas.clinics import (
     ClinicBranch,
@@ -59,6 +64,10 @@ payments = sa.Table(
 GOSUSLUGI_BOOKING = "https://www.gosuslugi.ru/10700"
 
 
+def child_specialty(code: str) -> bool:
+    return code == "pediatrician" or code.startswith("pediatric_")
+
+
 def portal_institution_page(value: str | None) -> str | None:
     if value:
         url = urlsplit(value)
@@ -104,12 +113,15 @@ def rank_clinics(rows, query: ClinicSearch, source_rows=()) -> ClinicSearchRespo
     insurers = {}
     sources_by_branch = {}
     portal_pages = {}
+    oms_organizations = set()
     for source in source_rows:
         if source["branch_id"]:
             sources_by_branch.setdefault(source["branch_id"], []).append(source)
         elif (source["kind"] == "organization" and source["organization_id"]
               and (page := portal_institution_page(source["url"]))):
             portal_pages.setdefault(source["organization_id"], set()).add(page)
+            if source.get("oms_evidence_url"):
+                oms_organizations.add(source["organization_id"])
     for row in rows:
         identifier = row["id"]
         if identifier not in nearby:
@@ -128,8 +140,10 @@ def rank_clinics(rows, query: ClinicSearch, source_rows=()) -> ClinicSearchRespo
         source_records = sources_by_branch.get(branch["id"], ())
         audience = branch.get("audience")
         if audience is None:
-            names = [branch["name"], *(source["fields"].get("name", {}).get("value", "") for source in source_records)]
-            if any(search(r"\bдетск[а-яё]*\b", name.lower()) for name in names):
+            names = [source["fields"].get("name", {}).get("value", "") for source in source_records]
+            if search(r"\bдетск[а-яё]*\b", branch["name"].lower()) or (
+                names and all(search(r"\bдетск[а-яё]*\b", name.lower()) for name in names)
+            ):
                 audience = "child"
         if audience == "child" and query.patient_group != "child":
             continue
@@ -138,6 +152,9 @@ def rank_clinics(rows, query: ClinicSearch, source_rows=()) -> ClinicSearchRespo
         )):
             continue
         sourced_specialties = {code for source in source_records for code in source["specialty_codes"]}
+        if query.patient_group == "adult":
+            sourced_specialties = {code for code in sourced_specialties if not child_specialty(code)}
+            offers = [offer for offer in offers if not child_specialty(offer.specialty_code)]
         specialty_offers = [offer for offer in offers
                             if not query.specialty_code or offer.specialty_code == query.specialty_code]
         if query.specialty_code and not specialty_offers and query.specialty_code not in sourced_specialties:
@@ -149,9 +166,17 @@ def rank_clinics(rows, query: ClinicSearch, source_rows=()) -> ClinicSearchRespo
                     insurers[offer.insurer.id] = offer.insurer
         if query.insurer_id:
             matching = [offer for offer in matching if offer.insurer and offer.insurer.id == query.insurer_id]
-        if query.payment_method and not matching:
+        oms_needs_confirmation = (
+            query.payment_method == "oms" and not matching and branch["kind"] == "public"
+            and branch.get("organization_id") in oms_organizations
+            and (query.specialty_code is None or query.specialty_code in sourced_specialties)
+        )
+        if query.payment_method and not matching and not oms_needs_confirmation:
             continue
-        phone_only = branch["kind"] == "private" or query.payment_method == "paid"
+        paid_only = any(offer.method == "paid" for offer in matching) and not any(
+            offer.method == "oms" for offer in matching
+        )
+        phone_only = branch["kind"] == "private" or query.payment_method == "paid" or paid_only
         pages = portal_pages.get(branch.get("organization_id"), ())
         portal_page = None
         if not phone_only:
@@ -174,6 +199,7 @@ def rank_clinics(rows, query: ClinicSearch, source_rows=()) -> ClinicSearchRespo
             **{key: branch[key] for key in ("id", "name", "address", "lat", "lon", "kind", "phones",
                                            "booking_url", "demo")},
             website=website, distance_km=distance, payments=matching, specialties=sorted(sourced_specialties),
+            oms_needs_confirmation=oms_needs_confirmation,
             sources=list(deduplicated.values()),
             poliklinika45_url=portal_page,
             gosuslugi_url=gosuslugi_page,
@@ -195,7 +221,12 @@ async def search_clinics(db, query: ClinicSearch, demo_mode: bool) -> ClinicSear
     if not demo_mode:
         statement = statement.where(branches.c.demo.is_(False))
     rows = (await db.execute(statement)).mappings()
-    sources = await db.execute(sa.select(clinic_sources).where(
+    sources = await db.execute(sa.select(
+        clinic_sources, oms_participants.c.evidence_url.label("oms_evidence_url"),
+    ).outerjoin(oms_participants, sa.and_(
+        clinic_sources.c.kind == "organization",
+        clinic_sources.c.external_id == oms_participants.c.poliklinika45_id,
+    )).where(
         clinic_sources.c.source == POLIKLINIKA45,
         clinic_sources.c.verification_status == "verified",
     ).order_by(clinic_sources.c.external_id))

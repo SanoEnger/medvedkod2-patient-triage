@@ -248,6 +248,7 @@ class Poliklinika45Adapter:
         for label, first_page in listed:
             url = first_page
             visited = set()
+            found = False
             while url:
                 if url in visited or len(visited) >= 35:
                     raise SourceUnavailable("Incomplete or cyclic public doctor pagination")
@@ -258,15 +259,11 @@ class Poliklinika45Adapter:
                     if isinstance(exc, SourceUnavailable):
                         raise
                     raise SourceUnavailable(f"{exc}: {url}") from None
-                if not rows:
-                    empty_profiles.append(label)
-                    break
-                linked = 0
                 for row in rows:
                     matches = {name for name in row["specialties"] if specialty_code(name) == specialty_code(label)}
                     if not matches:
                         continue
-                    linked += 1
+                    found = True
                     org_id = row["organization_id"]
                     if org_id not in organizations:
                         org_url = row["organization_url"]
@@ -294,9 +291,9 @@ class Poliklinika45Adapter:
                     evidence = record.setdefault("specialty_urls", {})
                     for name in sorted(matches):
                         evidence.setdefault(name, url)
-                if not linked:
-                    raise SourceUnavailable(f"No matching public specialties: {url}")
                 url = next_url
+            if not found:
+                empty_profiles.append(label)
 
         as_of = datetime.now(KURGAN_TIME).date()
         for unit, record in branches.items():

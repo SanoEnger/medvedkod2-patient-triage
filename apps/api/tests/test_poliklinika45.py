@@ -17,6 +17,7 @@ from app.integrations.poliklinika45_html import (
     doctor_groups,
     organization_details,
     published_schedule,
+    specialty_code,
 )
 
 MAINTENANCE = Path(__file__).parent / "fixtures/poliklinika45_maintenance.txt"
@@ -54,6 +55,25 @@ def test_schedule_uses_dated_public_times_without_slot_status():
     assert published_schedule(times, date(2026, 11, 25), "Терапевт") == [
         {"specialty": "Терапевт", "date": date(2026, 11, 27), "starts_at": time(9), "ends_at": time(12)},
     ]
+
+
+@pytest.mark.parametrize(("label", "code"), [
+    ("Кардиолог детский", "pediatric_cardiologist"),
+    ("Врач — психиатр", "psychiatrist"),
+    ("Стоматолог общ. практики", "dentist"),
+    ("Травматолог-ортопед", "orthopedic_traumatologist"),
+])
+def test_specialty_labels_in_extended_public_directory(label, code):
+    assert specialty_code(label) == code
+
+
+@pytest.mark.parametrize(("published", "canonical"), [
+    ("Курган, 7-Й, 3", "Курган, 7-й микрорайон, 3"),
+    ("Курган, ДЗЕРЖИНСКОГО, 41, корп. б", "Курган, Дзержинского, 41Б"),
+    ("Курган, К.МАРКСА, 80", "Курган, Карла Маркса, 80"),
+])
+def test_portal_addresses_match_their_physical_branch(published, canonical):
+    assert import_poliklinika45.normalized_address(published) == import_poliklinika45.normalized_address(canonical)
 
 
 @pytest.fixture

@@ -6,6 +6,7 @@ import type { ChatClient, ChatSummary, Conversation } from '../../api/chat'
 import { Button, Card } from '../../components/ui'
 import { VoiceInput } from '../../components/VoiceInput'
 import medvedUrl from '../../assets/medved-bear-button.svg?url'
+import { specialtyCode } from '../clinics/specialties'
 import { DeleteChatDialog } from './DeleteChatDialog'
 
 type Message = { text: string; client_message_id: string }
@@ -28,10 +29,11 @@ function errorText(error: unknown, fallback = 'Не удалось обнови�
   return fallback
 }
 
-export function ChatPage({ client, questionnaireId, saved, active, blocked, onHome, onHistory, onSurvey, onNew, onDeleted, transcribe }: {
+export function ChatPage({ client, questionnaireId, saved, active, blocked, onHome, onHistory, onSurvey, onNew, onDeleted, onClinics, transcribe }: {
   client: ChatClient; questionnaireId?: string; saved?: ChatSummary; active: boolean; blocked: boolean
   onHome: () => void; onSurvey: () => void; onNew: () => void
   onHistory?: () => void; onDeleted?: (id: string) => void
+  onClinics?: (specialty: string) => void
   transcribe?: TranscribeAudio
 }) {
   const [chat, setChat] = useState<Conversation | null>(null)
@@ -52,6 +54,10 @@ export function ChatPage({ client, questionnaireId, saved, active, blocked, onHo
   const previousMessage = lastMessage?.client_message_id && pending.current &&
     lastMessage.client_message_id !== pending.current.client_message_id ? lastMessage : undefined
   const waitingForReply = chat?.pending && !chat.retryable
+  const referral = !chat?.emergency && chat?.result?.urgency !== 'EMERGENCY'
+    ? chat?.messages.filter((message) => message.role === 'assistant' && message.clinic_specialty).at(-1)
+    : undefined
+  const clinicSpecialty = specialtyCode(referral?.clinic_specialty ?? null)
 
   function accept(value: Conversation) {
     setChat(value)
@@ -204,6 +210,10 @@ export function ChatPage({ client, questionnaireId, saved, active, blocked, onHo
       <ol className="chat-messages">{chat.messages.map((message) => <li className={'chat-message chat-message--' + message.role} key={message.id}>
         <p className="chat-author">{message.role === 'user' ? 'Вы' : 'МедВед'}</p>
         <p className="chat-text">{message.text}</p>
+        {message === referral && clinicSpecialty && onClinics &&
+          <Button className="chat-clinic-action" icon="map-pin" variant="secondary" onClick={() => onClinics(clinicSpecialty)}>
+            Посмотреть медучреждения рядом
+          </Button>}
       </li>)}</ol><div ref={bottom} />
     </div>}
     {chat?.emergency && <Card className="emergency-card" role="alert">

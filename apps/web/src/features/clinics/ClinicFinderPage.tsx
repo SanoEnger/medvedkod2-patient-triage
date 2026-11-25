@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError } from '../../api/client'
-import type { AddressCandidate, Clinic, ClinicSearch, ClinicSearchResult, ClinicsClient, Coordinates, PatientGroup, PaymentMethod } from '../../api/clinics'
+import type { AddressCandidate, Clinic, ClinicSearch, ClinicSearchResult, ClinicsClient, Coordinates, PatientGroup } from '../../api/clinics'
 import { Button, Card } from '../../components/ui'
 import { ClinicMap } from './ClinicMap'
 import type { MapStatus } from './ClinicMap'
 import { ClinicResult } from './ClinicResult'
-import { specialties } from './specialties'
+import { isChildSpecialty, specialties } from './specialties'
 import './clinics.css'
 
-const payments = { oms: 'ОМС', dms: 'ДМС', paid: 'Платно' }
+const payments = [['oms', 'ОМС'], ['paid', 'Платно']] as const
 const pilotMessage = 'Каталог сейчас покрывает только Курган.'
 const locationErrors: Record<number, string> = {
   1: 'Доступ к местоположению запрещён. Введите адрес вручную.',
@@ -17,10 +17,12 @@ const locationErrors: Record<number, string> = {
 }
 const noItems: Clinic[] = []
 const radii = [5, 10, 20, 30]
+const specialtyOptions = Object.entries(specialties).sort(([, left], [, right]) => left.localeCompare(right, 'ru'))
 const buildingAddress = (value: string) => value.replace(/(?:,\s*|\s+)(?:кв(?:артира)?\.?|подъезд|этаж)\s*№?\s*\d.*$/iu, '').trim()
 
 type SearchState = { query: ClinicSearch; attempt: number; result: ClinicSearchResult }
   | { query: ClinicSearch; attempt: number; error: string; outside: boolean }
+type SearchLocation = { point: Coordinates; source: 'address' | 'geolocation' | 'map' }
 
 export function ClinicFinderPage({ client, initialSpecialty, initialPatientGroup, onBack }: {
   client: ClinicsClient; initialSpecialty: string; initialPatientGroup?: PatientGroup; onBack: () => void
@@ -28,32 +30,33 @@ export function ClinicFinderPage({ client, initialSpecialty, initialPatientGroup
   const [address, setAddress] = useState('')
   const [editingAddress, setEditingAddress] = useState(false)
   const [candidates, setCandidates] = useState<AddressCandidate[]>([])
-  const [location, setLocation] = useState<Coordinates | null>(null)
+  const [location, setLocation] = useState<SearchLocation | null>(null)
   const [locating, setLocating] = useState('')
   const [locationError, setLocationError] = useState('')
-  const [specialty, setSpecialty] = useState(initialSpecialty)
+  const [specialty, setSpecialty] = useState(() =>
+    initialPatientGroup === 'adult' && isChildSpecialty(initialSpecialty) ? '' : initialSpecialty)
   const [patientGroup, setPatientGroup] = useState<PatientGroup | ''>(initialPatientGroup ?? '')
-  const [payment, setPayment] = useState<PaymentMethod | ''>('')
-  const [insurer, setInsurer] = useState('')
+  const [payment, setPayment] = useState<typeof payments[number][0] | ''>('')
   const [radius, setRadius] = useState(5)
   const [search, setSearch] = useState<SearchState>()
-  const [insurers, setInsurers] = useState<ClinicSearchResult['insurers']>([])
   const [attempt, setAttempt] = useState(0)
-  const [selected, setSelected] = useState<{ id: string; focusMarker: boolean }>()
+  const [selected, setSelected] = useState<{ id: string; focusMarker: boolean; query: ClinicSearch }>()
   const [mapStatus, setMapStatus] = useState<MapStatus>('loading')
   const [picking, setPicking] = useState(false)
-  const [offerMap, setOfferMap] = useState(false)
   const lookup = useRef<AbortController>(null)
   const clinicCards = useRef(new Map<string, HTMLElement>())
 
   const query = useMemo<ClinicSearch | undefined>(() => location && patientGroup ? {
-    ...location, radius_km: radius, specialty_code: specialty || undefined,
-    payment_method: payment || undefined, insurer_id: insurer || undefined, patient_group: patientGroup,
-  } : undefined, [location, radius, specialty, payment, insurer, patientGroup])
+    ...location.point, radius_km: radius, specialty_code: specialty || undefined,
+    payment_method: payment || undefined, patient_group: patientGroup,
+  } : undefined, [location, radius, specialty, payment, patientGroup])
   const current = search?.query === query && search?.attempt === attempt ? search : undefined
   const items = current && 'result' in current ? current.result.items : undefined
-  const selectedItem = items?.some((item) => item.id === selected?.id) ? selected : undefined
-  const showMap = (!!items?.length || picking) && mapStatus !== 'error'
+  const selectedItem = selected && selected.query === query && items?.some((item) => item.id === selected.id) ? selected : undefined
+  const refreshingMap = !!query && !current && search && 'result' in search && search.result.items.length > 0
+    && search.query.lat === query.lat && search.query.lon === query.lon
+  const hasMap = !!items?.length || picking || refreshingMap
+  const showMap = hasMap && mapStatus !== 'error'
 
   useEffect(() => () => lookup.current?.abort(), [])
   const lookupAddress = useCallback(async (value: string, controller: AbortController, submitted: boolean) => {
@@ -63,14 +66,12 @@ export function ClinicFinderPage({ client, initialSpecialty, initialPatientGroup
       setCandidates(candidates)
       if (submitted && !candidates.length) {
         setLocationError('Дом не найден в справочнике. Уточните улицу, номер дома, корпус или строение.')
-        setOfferMap(true)
       }
     } catch (cause) {
       if (controller.signal.aborted) return
       if (cause instanceof ApiError && cause.code === 'clinic_outside_pilot') setLocationError(pilotMessage)
       else if (submitted) {
         setLocationError('Справочник адресов временно недоступен. Повторите поиск или определите местоположение.')
-        setOfferMap(true)
       }
     } finally {
       if (!controller.signal.aborted) setLocating('')
@@ -94,7 +95,6 @@ export function ClinicFinderPage({ client, initialSpecialty, initialPatientGroup
       (result) => {
         if (controller.signal.aborted) return
         setSearch({ query, attempt, result })
-        setInsurers(result.insurers)
       },
       (cause) => {
         if (controller.signal.aborted) return
@@ -112,10 +112,7 @@ export function ClinicFinderPage({ client, initialSpecialty, initialPatientGroup
     setLocationError('')
     setCandidates([])
     setSelected(undefined)
-    setInsurer('')
-    setInsurers([])
     setMapStatus('loading')
-    setOfferMap(false)
     setPicking(false)
     setEditingAddress(false)
   }
@@ -135,8 +132,7 @@ export function ClinicFinderPage({ client, initialSpecialty, initialPatientGroup
       if (!Number.isFinite(coords.accuracy) || coords.accuracy > 1000) {
         setLocationError('Точность местоположения ниже 1 км. Введите адрес вручную.')
       } else {
-        setAddress('')
-        setLocation({ lat: coords.latitude, lon: coords.longitude })
+        useLocationPoint({ lat: coords.latitude, lon: coords.longitude }, 'geolocation')
       }
     }, (failure) => {
       if (controller.signal.aborted) return
@@ -152,7 +148,7 @@ export function ClinicFinderPage({ client, initialSpecialty, initialPatientGroup
       return
     }
     setAddress(candidate.label)
-    setLocation({ lat: candidate.lat, lon: candidate.lon })
+    setLocation({ source: 'address', point: { lat: candidate.lat, lon: candidate.lon } })
   }
 
   async function findAddress() {
@@ -168,10 +164,45 @@ export function ClinicFinderPage({ client, initialSpecialty, initialPatientGroup
     await lookupAddress(value, controller, true)
   }
 
+  function chooseMapLocation() {
+    if (!location) {
+      lookup.current?.abort()
+      setLocating('')
+    }
+    setEditingAddress(false)
+    setCandidates([])
+    setLocationError('')
+    if (mapStatus === 'error') setMapStatus('loading')
+    setPicking(true)
+  }
+
+  function useLocationPoint(point: Coordinates, source: 'geolocation' | 'map') {
+    resetLocation()
+    setAddress('')
+    setLocation({ source, point })
+    if (source !== 'geolocation') return
+    const controller = new AbortController()
+    lookup.current = controller
+    setLocating('Определяем ближайший адрес…')
+    void client.reverseGeocode(point, controller.signal).then(
+      ({ candidates: [nearest] }) => {
+        if (!controller.signal.aborted && nearest) setAddress(nearest.label)
+      },
+      () => {},
+    ).finally(() => {
+      if (!controller.signal.aborted) setLocating('')
+    })
+  }
+
+  function changePatientGroup(group: PatientGroup | '') {
+    setPatientGroup(group)
+    if (group === 'adult' && isChildSpecialty(specialty)) setSpecialty('')
+  }
+
   function selectOnMap(id: string) {
     const card = clinicCards.current.get(id)
-    if (!card) return
-    setSelected({ id, focusMarker: false })
+    if (!card || !query) return
+    setSelected({ id, focusMarker: false, query })
     card.focus()
     card.scrollIntoView({ block: 'nearest' })
   }
@@ -180,7 +211,12 @@ export function ClinicFinderPage({ client, initialSpecialty, initialPatientGroup
     <div><Button icon="arrow-left" variant="secondary" onClick={onBack}>Назад</Button></div>
     <h1 tabIndex={-1}>Медучреждения рядом</h1>
     <Card className="clinic-controls">
-      <div><Button variant="secondary" onClick={findLocation}>Определить моё местоположение</Button></div>
+      <div className="clinic-actions">
+        <Button variant="secondary" onClick={findLocation}>Определить моё местоположение</Button>
+        <Button variant="secondary" aria-expanded={picking} onClick={picking ? () => setPicking(false) : chooseMapLocation}>
+          {picking ? 'Закрыть выбор на карте' : 'Поставить точку на карте'}
+        </Button>
+      </div>
       <form className="clinic-address" onSubmit={(event) => { event.preventDefault(); void findAddress() }}>
         <label>Адрес пациента
           <input type="text" value={address} maxLength={240} autoComplete="off" placeholder="Курган, улица и номер дома"
@@ -189,16 +225,15 @@ export function ClinicFinderPage({ client, initialSpecialty, initialPatientGroup
         <Button type="submit">Найти по адресу</Button>
       </form>
       <p className="field-hint">Укажите улицу и номер дома. От этого адреса считаем расстояние до клиник. Номер квартиры не нужен.</p>
+      {location?.source === 'map' && <p className="field-hint">Точка поиска выбрана на карте.</p>}
+      {location?.source === 'geolocation' && <p className="field-hint">
+        Ищем от местоположения устройства.
+        {address ? ' В поле указан ближайший адрес.' : !locating && ' Ближайший адрес не удалось определить.'}
+      </p>}
       <p className="field-hint">Адресный справочник © <a href="https://www.openstreetmap.org/copyright"
         target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a></p>
       {locating && <p role="status">{locating}</p>}
       {locationError && <p role="alert">{locationError}</p>}
-      {offerMap && !picking && mapStatus !== 'error' && <div>
-        <Button variant="secondary" onClick={() => { lookup.current?.abort(); setEditingAddress(false); setPicking(true) }}>Поставить точку на карте</Button>
-      </div>}
-      {picking && <p role="status">{mapStatus === 'error'
-        ? 'Карта недоступна. Уточните адрес или определите местоположение.'
-        : 'Выберите точку на карте или переместите карту стрелками и подтвердите её центр.'}</p>}
       {!!candidates.length && <div>
         <p id="clinic-candidates" role="status">{candidates.length === 1 ? 'Подтвердите найденный адрес.' : 'Выберите подходящий адрес.'}</p>
         <ul className="clinic-candidates" aria-labelledby="clinic-candidates">{candidates.map((candidate) =>
@@ -209,40 +244,33 @@ export function ClinicFinderPage({ client, initialSpecialty, initialPatientGroup
       <fieldset className="clinic-payment">
         <legend>Способ оплаты</legend>
         <div className="clinic-payment-options">
-          <label><input type="radio" name="clinic-payment" checked={!payment} onChange={() => { setPayment(''); setInsurer('') }} />Все</label>
-          {(Object.keys(payments) as PaymentMethod[]).map((method) => <label key={method}>
+          <label><input type="radio" name="clinic-payment" checked={!payment} onChange={() => setPayment('')} />Все</label>
+          {payments.map(([method, label]) => <label key={method}>
             <input type="radio" name="clinic-payment" checked={payment === method}
-              onChange={() => { setPayment(method); setInsurer('') }} />{payments[method]}
+              onChange={() => setPayment(method)} />{label}
           </label>)}
         </div>
       </fieldset>
       <div className="clinic-filters">
         <label>Возраст пациента
-          <select value={patientGroup} onChange={(event) => {
-            setPatientGroup(event.target.value as PatientGroup | ''); setInsurer(''); setInsurers([])
-          }}>
+          <select value={patientGroup} onChange={(event) => changePatientGroup(event.target.value as PatientGroup | '')}>
             <option value="" disabled>Выберите возрастную группу</option>
             <option value="child">Младше 18 лет</option>
             <option value="adult">18 лет и старше</option>
           </select>
         </label>
         <label>Специалист
-          <select value={specialty} onChange={(event) => { setSpecialty(event.target.value); setInsurer(''); setInsurers([]) }}>
+          <select value={specialty} onChange={(event) => setSpecialty(event.target.value)}>
             <option value="">Любой специалист</option>
-            {Object.entries(specialties).map(([code, name]) => <option key={code} value={code}>{name}</option>)}
+            {specialtyOptions.filter(([code]) => patientGroup !== 'adult' || !isChildSpecialty(code))
+              .map(([code, name]) => <option key={code} value={code}>{name}</option>)}
           </select>
         </label>
         <label>Радиус
-          <select value={radius} onChange={(event) => { setRadius(Number(event.target.value)); setInsurer(''); setInsurers([]) }}>
+          <select value={radius} onChange={(event) => setRadius(Number(event.target.value))}>
             {radii.map((km) => <option key={km} value={km}>{km} км</option>)}
           </select>
         </label>
-        {payment === 'dms' && insurers.length > 0 && <label>Страховая
-          <select value={insurer} onChange={(event) => setInsurer(event.target.value)}>
-            <option value="">Любая страховая</option>
-            {insurers.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
-          </select>
-        </label>}
       </div>
     </Card>
     {location && !patientGroup && <p role="status">Выберите возрастную группу пациента, чтобы подобрать медучреждения.</p>}
@@ -253,21 +281,27 @@ export function ClinicFinderPage({ client, initialSpecialty, initialPatientGroup
     </div>}
     {items && items.length === 0 && <div>
       <p role="status">Медучреждения не найдены. Измените фильтры или увеличьте радиус поиска.</p>
-      {specialty && <Button variant="secondary" onClick={() => { setSpecialty(''); setInsurer(''); setInsurers([]) }}>
+      {specialty && <Button variant="secondary" onClick={() => setSpecialty('')}>
         Показать клиники без фильтра по специалисту
       </Button>}
-      {radius < 30 && <Button variant="secondary" onClick={() => { setRadius(radii[radii.indexOf(radius) + 1]); setInsurer(''); setInsurers([]) }}>
+      {radius < 30 && <Button variant="secondary" onClick={() => setRadius(radii[radii.indexOf(radius) + 1])}>
         Увеличить радиус
       </Button>}
     </div>}
-    <div className={showMap && items?.length ? 'clinic-results' : undefined}>
-      {showMap && <ClinicMap items={items ?? noItems} selection={selectedItem} picking={picking}
-        onSelect={selectOnMap} onStatus={setMapStatus} onPoint={(point) => { resetLocation(); setLocation(point) }} />}
-      {items && items.length > 0 && <div className="clinic-results-list">
+    {hasMap && mapStatus === 'error' && <div>
+      {picking && <p role="status">Карта недоступна. Введите адрес или определите местоположение.</p>}
+      {!picking && !!items?.length && <p role="status">Карта недоступна. Медучреждения показаны списком.</p>}
+      <Button variant="secondary" onClick={() => setMapStatus('loading')}>Повторить загрузку карты</Button>
+    </div>}
+    <div className={showMap && !picking && (items?.length || refreshingMap) ? 'clinic-results' : undefined}>
+      {showMap && <ClinicMap items={picking ? noItems : items ?? noItems} selection={picking ? undefined : selectedItem}
+        picking={picking} origin={location?.point} ready={mapStatus === 'ready'}
+        onSelect={selectOnMap} onStatus={setMapStatus} onPoint={(point) => useLocationPoint(point, 'map')}
+        onCancel={() => setPicking(false)} />}
+      {!picking && items && items.length > 0 && <div className="clinic-results-list">
         {mapStatus === 'loading' && <p role="status">Загружаем карту…</p>}
-        {mapStatus === 'error' && <p role="status">Карта недоступна. Медучреждения показаны списком.</p>}
         {items.map((item) => <ClinicResult key={item.id} clinic={item} paidSearch={payment === 'paid'} selected={selectedItem?.id === item.id}
-          onSelect={mapStatus === 'ready' ? () => setSelected({ id: item.id, focusMarker: true }) : undefined}
+          onSelect={mapStatus === 'ready' && query ? () => setSelected({ id: item.id, focusMarker: true, query }) : undefined}
           register={(card) => { if (card) clinicCards.current.set(item.id, card); else clinicCards.current.delete(item.id) }} />)}
       </div>}
     </div>

@@ -18,11 +18,32 @@ SPECIALTIES = {
     "оториноларинголог": "otolaryngologist", "лор": "otolaryngologist", "офтальмолог": "ophthalmologist",
     "гинеколог": "gynecologist", "акушер-гинеколог": "gynecologist", "хирург": "surgeon",
     "врач общей практики": "general_practitioner", "врач общ. практики": "general_practitioner",
+    "аллерголог": "allergist", "аллерголог-иммунолог": "allergist",
+    "врач по лечебной физкультуре": "exercise_therapy", "лечебная физкультура": "exercise_therapy",
+    "психиатр": "psychiatrist", "гериатр": "geriatrician",
+    "зубной врач": "dental_practitioner", "инфекционист": "infectious_disease_specialist",
+    "кардиолог детский": "pediatric_cardiologist", "детский кардиолог": "pediatric_cardiologist",
+    "клинический психолог": "clinical_psychologist", "медицинский психолог": "clinical_psychologist",
+    "онколог": "oncologist", "профпатолог": "occupational_physician",
+    "психиатр-нарколог": "addiction_psychiatrist", "нарколог": "addiction_psychiatrist",
+    "психотерапевт": "psychotherapist", "пульмонолог": "pulmonologist", "ревматолог": "rheumatologist",
+    "стоматолог детский": "pediatric_dentist", "детский стоматолог": "pediatric_dentist",
+    "стоматолог": "dentist", "стоматолог общ. практики": "dentist", "стоматолог общей практики": "dentist",
+    "стоматолог-ортопед": "prosthodontist", "стоматолог-терапевт": "dental_therapist",
+    "стоматолог-хирург": "dental_surgeon", "травматолог-ортопед": "orthopedic_traumatologist",
+    "уролог": "urologist", "уролог-андролог детский": "pediatric_urologist",
+    "детский уролог-андролог": "pediatric_urologist", "фельдшер": "feldsher",
+    "физиотерапевт": "physiotherapist", "фтизиатр": "tb_specialist",
+    "хирург детский": "pediatric_surgeon", "детский хирург": "pediatric_surgeon",
+    "эндокринолог": "endocrinologist", "гастроэнтеролог": "gastroenterologist",
+    "нефролог": "nephrologist", "гематолог": "hematologist", "нейрохирург": "neurosurgeon",
+    "проктолог": "coloproctologist", "колопроктолог": "coloproctologist",
 }
 
 
 def specialty_code(label: str) -> str | None:
     value = " ".join(label.lower().replace("ё", "е").split())
+    value = re.sub(r"\s*[‑–—-]\s*", "-", value)
     return SPECIALTIES.get(value) or SPECIALTIES.get(re.sub(r"^врач[ -]+|\s+участковый$", "", value))
 
 
@@ -92,7 +113,7 @@ def doctor_groups(html, url, expected_page):
             raise ValueError("Invalid public doctor pagination")
         query.setdefault("terr_id", current_query.get("terr_id", []))
         next_url = next_parts._replace(query=urlencode(query, doseq=True)).geturl()
-    if not table.select_one(".Lpuunit") or not result:
+    if not table.select_one(".Lpuunit"):
         raise ValueError("Empty public doctor page")
     return result, next_url
 
@@ -154,7 +175,7 @@ def organization_details(html, url, external_id):
         raise ValueError("Missing public organization name")
     name = values["Название"].get_text(" ", strip=True)
     lowered = name.casefold()
-    kind = "public" if lowered.startswith(("государствен", "муниципальн", "гбу ", "гауз ")) else (
+    kind = "public" if lowered.startswith(("государствен", "муниципальн", "федеральное государственное", "гбу ", "гауз ")) else (
         "private" if lowered.startswith(("частное", "чуз ", "ооо ", "общество с ограниченной")) else None
     )
     website = None

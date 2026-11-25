@@ -76,6 +76,8 @@ def test_booking_links_use_the_mapped_institution_page_and_are_hidden_for_paid_v
     [paid] = rank_clinics([public | {"method": "paid"}], query.model_copy(update={"payment_method": "paid"}), [portal]).items
     assert paid.poliklinika45_url is paid.gosuslugi_url is None
     assert not paid.gosuslugi_select_branch
+    [unfiltered_paid] = rank_clinics([public | {"method": "paid"}], query, [portal]).items
+    assert unfiltered_paid.poliklinika45_url is unfiltered_paid.gosuslugi_url is None
     direct = public | {"gosuslugi_confirmed": True, "gosuslugi_direct_url": "https://www.gosuslugi.ru/example"}
     [confirmed] = rank_clinics([direct], query, [portal]).items
     assert confirmed.gosuslugi_url == direct["gosuslugi_direct_url"]

@@ -54,17 +54,19 @@ class YandexTileLayer extends TileLayer {
 
 export type MapStatus = 'loading' | 'ready' | 'error'
 
-export function ClinicMap({ items, selection, picking, onSelect, onPoint, onStatus }: {
-  items: Clinic[]; selection?: { id: string; focusMarker: boolean }; picking: boolean
+export function ClinicMap({ items, selection, picking, ready, origin, onSelect, onPoint, onStatus, onCancel }: {
+  items: Clinic[]; selection?: { id: string; focusMarker: boolean }; picking: boolean; ready: boolean
+  origin?: Coordinates
   onSelect: (id: string) => void; onPoint: (point: Coordinates) => void; onStatus: (status: MapStatus) => void
+  onCancel: () => void
 }) {
   const container = useRef<HTMLDivElement>(null)
   const instance = useRef<LeafletMap>(null)
   const layers = useRef<ReturnType<typeof layerGroup>>(null)
   const markers = useRef(new Map<string, Marker>())
-  const callbacks = useRef({ picking, onPoint, onSelect, onStatus })
+  const callbacks = useRef({ picking, ready, onSelect, onStatus })
 
-  useEffect(() => { callbacks.current = { picking, onPoint, onSelect, onStatus } }, [picking, onPoint, onSelect, onStatus])
+  useEffect(() => { callbacks.current = { picking, ready, onSelect, onStatus } }, [picking, ready, onSelect, onStatus])
   useEffect(() => {
     if (!container.current) return
     const tileMap = createMap(container.current, {
@@ -72,7 +74,7 @@ export function ClinicMap({ items, selection, picking, onSelect, onPoint, onStat
     })
     tileMap.attributionControl.setPrefix(false)
     tileMap.on('click', ({ latlng }) => {
-      if (callbacks.current.picking) callbacks.current.onPoint({ lat: latlng.lat, lon: latlng.lng })
+      if (callbacks.current.picking && callbacks.current.ready) tileMap.panTo(latlng, { animate: false })
     })
     instance.current = tileMap
     layers.current = layerGroup().addTo(tileMap)
@@ -89,6 +91,7 @@ export function ClinicMap({ items, selection, picking, onSelect, onPoint, onStat
       const next = useYandex && yandexKey ? new YandexTileLayer(yandexKey)
         : tileLayer(osmTiles, { ...tileOptions, attribution: osmAttribution })
       layer = next
+      let hasTile = false
       if (useYandex) {
         logo = document.createElement('a')
         logo.className = 'clinic-map-logo'
@@ -102,17 +105,24 @@ export function ClinicMap({ items, selection, picking, onSelect, onPoint, onStat
         container.current?.append(logo)
       }
       const fallback = () => queueMicrotask(() => {
-        if (!active || layer !== next) return
+        if (!active || layer !== next || hasTile) return
         if (useYandex) addTiles(false)
         else callbacks.current.onStatus('error')
       })
-      next.once('tileload', () => {
+      const waitForTiles = () => {
+        hasTile = false
+        window.clearTimeout(timer)
+        timer = window.setTimeout(fallback, 9000)
+      }
+      next.on('loading', waitForTiles)
+      next.on('tileload', () => {
         if (!active || layer !== next) return
+        hasTile = true
         window.clearTimeout(timer)
         callbacks.current.onStatus('ready')
       })
-      next.once('tileerror', fallback)
-      timer = window.setTimeout(fallback, 9000)
+      next.on('load', () => { if (!hasTile) fallback() })
+      waitForTiles()
       next.addTo(tileMap)
     }
 
@@ -141,9 +151,16 @@ export function ClinicMap({ items, selection, picking, onSelect, onPoint, onStat
       markers.current.set(clinic.id, pin)
       pin.getElement()?.setAttribute('aria-label', clinic.name)
     })
-    if (items.length) tileMap.fitBounds(latLngBounds(items.map(({ lat, lon }) => [lat, lon])), { padding: [42, 42], maxZoom: 16 })
-    else tileMap.setView([55.445, 65.34], 13)
-  }, [items])
+    if (picking && origin) tileMap.setView([origin.lat, origin.lon], 16)
+    else if (items.length) tileMap.fitBounds(latLngBounds(items.map(({ lat, lon }) => [lat, lon])), { padding: [42, 42], maxZoom: 16 })
+    else if (!Number.isFinite(tileMap.getZoom())) tileMap.setView([55.445, 65.34], 13)
+  }, [items, origin, picking])
+
+  useEffect(() => {
+    if (!picking || !container.current) return
+    container.current.focus({ preventScroll: true })
+    container.current.scrollIntoView({ block: 'nearest' })
+  }, [picking])
 
   useEffect(() => {
     for (const [id, pin] of markers.current) pin.getElement()?.setAttribute('aria-pressed', String(id === selection?.id))
@@ -155,14 +172,25 @@ export function ClinicMap({ items, selection, picking, onSelect, onPoint, onStat
   }, [selection, items])
 
   return <div className="clinic-map">
-    <div className="clinic-map-canvas" ref={container} role="region" aria-label="Карта медучреждений" />
+    {picking && <p className="field-hint" id="clinic-map-instructions">
+      Нажмите на нужное место или переместите карту под меткой. Затем нажмите «Искать от этой точки».
+    </p>}
+    <div className="clinic-map-viewport">
+      <div className="clinic-map-canvas" ref={container} role="region" tabIndex={0}
+        aria-label={picking ? 'Карта выбора точки' : 'Карта медучреждений'} aria-busy={picking && !ready}
+        aria-describedby={picking ? 'clinic-map-instructions' : undefined} />
+      {picking && <span className="clinic-map-target" aria-hidden="true" />}
+    </div>
     <div className="clinic-map-controls">
       <Button variant="secondary" aria-label="Приблизить карту" onClick={() => instance.current?.zoomIn()}>+</Button>
       <Button variant="secondary" aria-label="Отдалить карту" onClick={() => instance.current?.zoomOut()}>−</Button>
-      {picking && <Button variant="secondary" onClick={() => {
-        const center = instance.current?.getCenter()
-        if (center) onPoint({ lat: center.lat, lon: center.lng })
-      }}>Искать от центра карты</Button>}
+      {picking && <>
+        <Button disabled={!ready} onClick={() => {
+          const center = instance.current?.getCenter()
+          if (center) onPoint({ lat: center.lat, lon: center.lng })
+        }}>Искать от этой точки</Button>
+        <Button variant="secondary" onClick={onCancel}>Отмена</Button>
+      </>}
     </div>
   </div>
 }

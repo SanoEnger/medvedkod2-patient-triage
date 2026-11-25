@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.security import get_principal
-from app.db.clinic_addresses import address_query, find_addresses
+from app.db.clinic_addresses import address_query, find_addresses, nearest_address
 from app.db.clinic_catalog import search_clinics, within_pilot
 from app.schemas.clinics import (
     ClinicSearch,
     ClinicSearchResponse,
+    Coordinates,
     GeocodeRequest,
     GeocodeResponse,
 )
@@ -29,6 +30,21 @@ async def geocode(body: GeocodeRequest, request: Request):
     except SQLAlchemyError:
         raise HTTPException(status_code=503, detail="clinic_addresses_unavailable") from None
     return GeocodeResponse(candidates=candidates)
+
+
+@router.post("/reverse-geocode", response_model=GeocodeResponse, dependencies=[Depends(get_principal)])
+async def reverse_geocode(body: Coordinates, request: Request):
+    if not within_pilot(body.lat, body.lon):
+        raise HTTPException(status_code=422, detail="clinic_outside_pilot")
+    factory = request.app.state.clinic_db
+    if factory is None:
+        raise HTTPException(status_code=503, detail="clinic_addresses_unavailable")
+    try:
+        async with factory() as db:
+            candidate = await nearest_address(db, body)
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="clinic_addresses_unavailable") from None
+    return GeocodeResponse(candidates=[candidate] if candidate else [])
 
 
 @router.post("/search", response_model=ClinicSearchResponse, dependencies=[Depends(get_principal)])

@@ -6,6 +6,12 @@ from app.db.models import Base
 CATALOG_IMPORT_LOCK = 1093497173
 POLIKLINIKA45 = "poliklinika45"
 
+oms_participants = sa.Table(
+    "clinic_oms_participants", Base.metadata,
+    sa.Column("poliklinika45_id", sa.String(160), primary_key=True),
+    sa.Column("evidence_url", sa.Text, nullable=False),
+)
+
 clinic_sources = sa.Table(
     "clinic_sources", Base.metadata,
     sa.Column("source", sa.String(32), primary_key=True),

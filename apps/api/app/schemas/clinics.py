@@ -92,6 +92,7 @@ class ClinicBranch(Coordinates):
     gosuslugi_select_branch: bool = False
     demo: bool
     payments: list[ClinicPayment]
+    oms_needs_confirmation: bool = False
     specialties: list[Code] = Field(default_factory=list)
     sources: list[ClinicSourceInfo] = Field(default_factory=list)
     distance_km: float
