@@ -21,6 +21,7 @@ test('survey remains mounted on home, blocks chat, then hands its result to MedV
   const open = vi.fn(async (id?: string) => conversation(id))
   const client: MedvedClient = {
     ...base,
+    clinics: { geocode: vi.fn(), search: vi.fn() },
     create: async () => { current = await base.create(); return current },
     answer: async (...args) => { current = await base.answer(...args); return current },
     back: async (...args) => { current = await base.back(...args); return current },
@@ -87,7 +88,7 @@ test('history opens with an active survey, and changing MAX identity clears the 
     messages: [{ id: crypto.randomUUID(), role: 'assistant', text: 'Синтетическая переписка владельца', created_at: date, emergency: true }],
   }))
   vi.spyOn(api, 'createApiClient').mockReturnValue({
-    ...base, chat: { list, open, get, send: vi.fn(), delete: vi.fn(), availability: async () => ({ active_survey: activeSurvey }) },
+    ...base, clinics: { geocode: vi.fn(), search: vi.fn() }, chat: { list, open, get, send: vi.fn(), delete: vi.fn(), availability: async () => ({ active_survey: activeSurvey }) },
   })
   const first = { kind: 'host' as const, initialize: async () => ({ mode: 'max' as const }) }
   const second = { ...first }
@@ -126,7 +127,7 @@ test('history opens a completed result without creating its chat', async () => {
   const open = vi.fn()
   const getChat = vi.fn()
   vi.spyOn(api, 'createApiClient').mockReturnValue({
-    ...base, get,
+    ...base, get, clinics: { geocode: vi.fn(), search: vi.fn() },
     chat: { list: async () => ({ items: [saved], next_cursor: null }), open, get: getChat, send: vi.fn(),
       delete: vi.fn(), availability: async () => ({ active_survey: null }) },
   })

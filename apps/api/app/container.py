@@ -69,8 +69,12 @@ def configure(runtime: Path = RUNTIME) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init", "serve", "health"))
-    command = parser.parse_args().command
+    parser.add_argument("command", choices=("init", "serve", "health", "import-clinics", "import-clinic-addresses", "import-poliklinika45"))
+    parser.add_argument("parameters", nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+    command = args.command
+    if args.parameters and command in ("init", "serve", "health"):
+        parser.error("unexpected arguments")
     configure_logging()
     if command == "init":
         event("container.init_started", service="init")
@@ -81,6 +85,16 @@ def main() -> None:
         with urlopen("https://localhost:8443/health", context=context, timeout=3) as response:
             if response.status != 200:
                 raise SystemExit(1)
+    elif command == "import-poliklinika45":
+        configure()
+        result = subprocess.run([sys.executable, "-m", "app.db.import_poliklinika45", *args.parameters], check=False)
+        raise SystemExit(result.returncode)
+    elif command in ("import-clinics", "import-clinic-addresses"):
+        if len(args.parameters) != 1:
+            parser.error(f"{command} requires one catalog path")
+        configure()
+        module = "import_clinics" if command == "import-clinics" else "import_clinic_addresses"
+        subprocess.run([sys.executable, "-m", f"app.db.{module}", args.parameters[0]], check=True)
     else:
         configure()
         event("container.migrations_started", mode=os.getenv("NLP_MODE", "mock"))

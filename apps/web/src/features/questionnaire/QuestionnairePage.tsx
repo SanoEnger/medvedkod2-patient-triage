@@ -7,6 +7,14 @@ import type { TranscribeAudio } from '../../api/client'
 import { titles, draftsFromAnswers } from './fields'
 import { QuestionForm } from './QuestionForm'
 import { useQuestionnaire } from './useQuestionnaire'
+import { ClinicEntry } from '../clinics/ClinicEntry'
+
+export function EmergencyActions() {
+  return <div className="emergency-actions">
+    <a className="button button--primary" href="tel:103"><Icon name="phone" /><span>Позвонить 103</span></a>
+    <a className="button button--secondary" href="tel:112"><Icon name="phone" /><span>Позвонить 112</span></a>
+  </div>
+}
 
 const urgencyLabels: Record<Triage['urgency'], string> = {
   EMERGENCY: 'Экстренно', WITHIN_24H: 'В течение 24 часов', PLANNED: 'Планово', SELF_CARE: 'Самопомощь', UNKNOWN: 'Нужно уточнение',
@@ -40,8 +48,9 @@ function errorText(status: number, invalid: boolean, hasSession: boolean): strin
   return 'Не удалось подтвердить действие. Проверьте подключение и повторите попытку.'
 }
 
-export function QuestionnairePage({ client, onHome, onChat, initialSurvey, active = true, onSessionChange, transcribe }: {
+export function QuestionnairePage({ client, onHome, onChat, onClinics, initialSurvey, active = true, onSessionChange, transcribe }: {
   client: SurveyClient; onHome: () => void; onChat?: (id: string) => void; initialSurvey?: Survey | null
+  onClinics?: (result: Triage, age?: number | null) => void
   active?: boolean; onSessionChange?: (survey: Survey | null) => void
   transcribe?: TranscribeAudio
 }) {
@@ -88,10 +97,7 @@ export function QuestionnairePage({ client, onHome, onChat, initialSurvey, activ
       <h1 ref={heading} tabIndex={-1}>Вызовите скорую помощь</h1>
       <p className="emergency-message" role="alert">Вызовите скорую помощь (103/112). Не ждите окончания опроса.</p>
       {flow.survey?.result?.rationale && <p>{flow.survey.result.rationale}</p>}
-      <div className="emergency-actions">
-        <a className="button button--primary" href="tel:103"><Icon name="phone" /><span>Позвонить 103</span></a>
-        <a className="button button--secondary" href="tel:112"><Icon name="phone" /><span>Позвонить 112</span></a>
-      </div>
+      <EmergencyActions />
       {error}
       <Button icon="restart" variant="secondary" disabled={flow.busy} onClick={reset}>Начать новый опрос</Button>
     </Card> : <>
@@ -142,6 +148,8 @@ export function QuestionnairePage({ client, onHome, onChat, initialSurvey, activ
                 if (flow.survey!.status !== 'REVIEWING' || await flow.triage()) reset()
               }}>Начать новый опрос</Button>
             </div>
+            {surveyCompleted && flow.survey.result && onClinics && <ClinicEntry result={flow.survey.result}
+              age={flow.survey.answers?.patient_context?.age_years} onOpen={onClinics} />}
             {!surveyCompleted && chatHintFor === flow.survey.id &&
               <p className="field-hint" role="status">Чтобы уточнить результат у МедВеда, завершите опрос.</p>}
             {editing && <Card><h2>К какому шагу вернуться?</h2><p className="question-note">После возврата следующие ответы нужно подтвердить заново. Прежний результат будет сброшен.</p>

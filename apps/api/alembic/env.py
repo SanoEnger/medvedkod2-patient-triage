@@ -3,6 +3,7 @@ import asyncio
 from alembic import context
 from app.core.config import Settings
 from app.db.engine import create_engine
+from app.db import clinic_addresses, clinic_catalog, clinic_sources  # noqa: F401 - register catalog tables
 from app.db.models import Base
 
 env_file = context.get_x_argument(as_dictionary=True).get("env_file")

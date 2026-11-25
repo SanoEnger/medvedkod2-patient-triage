@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { HostContext, MaxHostAdapter } from '../max/MaxHostAdapter'
-import type { Survey } from '../api/contracts'
+import type { Survey, Triage } from '../api/contracts'
+import type { PatientGroup } from '../api/clinics'
 import type { ChatKind, ChatSummary } from '../api/chat'
 import { ErrorState, LoadingState } from '../components/ScreenState'
 import { Button } from '../components/ui'
 import { WelcomePage } from '../pages/WelcomePage'
 import { QuestionnairePage } from '../features/questionnaire/QuestionnairePage'
 import { SavedSurveyResultPage } from '../features/questionnaire/SavedSurveyResultPage'
+import { ClinicFinderPage } from '../features/clinics/ClinicFinderPage'
+import { specialtyCode } from '../features/clinics/specialties'
 import { ChatPage } from '../features/chat/ChatPage'
 import { ChatHistoryPage } from '../features/chat/ChatHistoryPage'
 import { createApiClient } from '../api/client'
@@ -44,7 +47,7 @@ export function App({ hostAdapter }: { hostAdapter?: MaxHostAdapter }) {
   </AppShell>
 }
 
-type Page = 'welcome' | 'survey' | 'chat' | 'history' | 'result'
+type Page = 'welcome' | 'survey' | 'chat' | 'history' | 'result' | 'clinics'
 
 function Workspace({ client }: { client: MedvedClient }) {
   const [page, setPage] = useState<Page>('welcome')
@@ -57,6 +60,7 @@ function Workspace({ client }: { client: MedvedClient }) {
   const [availabilityError, setAvailabilityError] = useState(false)
   const [refresh, setRefresh] = useState(0)
   const [resultId, setResultId] = useState<string>()
+  const [clinicTarget, setClinicTarget] = useState<{ from: 'survey' | 'result'; specialty: string; group?: PatientGroup }>()
   const [historyFilter, setHistoryFilter] = useState<ChatKind>()
   const [chatTarget, setChatTarget] = useState<{ questionnaireId?: string; saved?: ChatSummary; key: string } | null>(null)
   const focusAfterNavigation = useRef(false)
@@ -107,6 +111,13 @@ function Workspace({ client }: { client: MedvedClient }) {
     setChatTarget({ saved, key: crypto.randomUUID() })
     navigate('chat')
   }
+  function openClinics(result: Triage, from: 'survey' | 'result', age?: number | null) {
+    if (result.urgency === 'EMERGENCY') return
+    const group = typeof age === 'number' && Number.isInteger(age) && age >= 0 && age <= 120
+      ? (age < 18 ? 'child' : 'adult') : undefined
+    setClinicTarget({ from, specialty: specialtyCode(result.specialty), group })
+    navigate('clinics')
+  }
   function chatDeleted(id: string) {
     setChatTarget(null)
     if (survey?.id === id) {
@@ -123,11 +134,17 @@ function Workspace({ client }: { client: MedvedClient }) {
     </>}
     {page === 'history' && <ChatHistoryPage client={client} filter={historyFilter} onFilterChange={setHistoryFilter}
       onHome={() => navigate('welcome')} onOpen={openSaved} onDeleted={chatDeleted} />}
-    {page === 'result' && resultId && <SavedSurveyResultPage key={resultId} id={resultId} client={client} chatBlocked={chatBlocked}
-      onHistory={() => navigate('history')} onChat={() => openChat(resultId)} />}
+    {resultId && (page === 'result' || (page === 'clinics' && clinicTarget?.from === 'result')) &&
+      <div hidden={page !== 'result'}>
+        <SavedSurveyResultPage key={resultId} id={resultId} client={client} chatBlocked={chatBlocked} active={page === 'result'}
+          onHistory={() => navigate('history')} onChat={() => openChat(resultId)} onClinics={(result, age) => openClinics(result, 'result', age)} />
+      </div>}
+    {page === 'clinics' && clinicTarget && <ClinicFinderPage client={client.clinics} initialSpecialty={clinicTarget.specialty}
+      initialPatientGroup={clinicTarget.group}
+      onBack={() => { navigate(clinicTarget.from); setClinicTarget(undefined) }} />}
     {surveyOpened && <div hidden={page !== 'survey'}>
       <QuestionnairePage key={surveyKey} client={client} initialSurvey={initialSurvey} active={page === 'survey'} onSessionChange={setSurvey} transcribe={client.transcribe}
-        onHome={() => navigate('welcome')} onChat={(id) => openChat(id)} />
+        onHome={() => navigate('welcome')} onChat={(id) => openChat(id)} onClinics={(result, age) => openClinics(result, 'survey', age)} />
     </div>}
     {chatTarget && <div hidden={page !== 'chat'}>
       <ChatPage key={chatTarget.key} client={client.chat} questionnaireId={chatTarget.questionnaireId} saved={chatTarget.saved} transcribe={client.transcribe}

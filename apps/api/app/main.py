@@ -12,6 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.api.chat_routes import router as chat_router
+from app.api.clinic_routes import router as clinic_router
 from app.api.routes import router
 from app.api.voice_routes import MAX_AUDIO_BYTES, TRANSCRIPTION_PATH, router as voice_router
 from app.core.config import Settings
@@ -55,6 +56,7 @@ def create_app(
     settings.validate()
     extractor = extractor or SymptomExtractor(GroqClient(GroqSettings.from_env()) if settings.nlp_mode == "live" else MockGroqClient())
     engine = None
+    factory = None
     if session_service is None:
         cipher = JsonCipher.from_file(settings.data_encryption_key_file)
         engine = create_engine(settings=settings)
@@ -93,6 +95,7 @@ def create_app(
     app.state.settings = settings
     app.state.sessions = session_service
     app.state.chat = chat_service
+    app.state.clinic_db = factory
     app.state.max_core = max_core or MaxCoreClient(settings)
     app.state.launch_limiter = LocalRateLimiter()
     app.state.voice_lock = asyncio.Lock()
@@ -130,6 +133,7 @@ def create_app(
 
     app.include_router(router)
     app.include_router(chat_router)
+    app.include_router(clinic_router)
     app.include_router(voice_router)
     app.add_middleware(RequestLoggingMiddleware)
     return app

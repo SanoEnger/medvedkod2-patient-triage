@@ -3,7 +3,7 @@ name = "medved-groq-nlp"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-  "pydantic>=2.10,<3", "httpx>=0.28,<1", "python-dotenv>=1,<2",
+  "pydantic>=2.10,<3", "httpx>=0.28,<1", "python-dotenv>=1,<2", "beautifulsoup4>=4.13,<5",
   "fastapi>=0.115,<1", "uvicorn>=0.30,<1",
   "SQLAlchemy[asyncio]>=2.0,<2.1", "alembic>=1.14,<2", "asyncpg>=0.30,<1",
   "cryptography>=46,<51",
