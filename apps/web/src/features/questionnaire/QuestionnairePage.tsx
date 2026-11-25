@@ -84,10 +84,13 @@ export function QuestionnairePage({ client, onHome, onChat, initialSurvey, activ
   return <div className="questionnaire-page">
     {!flow.emergency && <Button icon="home" variant="secondary" className="home-action" disabled={flow.busy} onClick={onHome}>На главную</Button>}
     {flow.emergency ? <Card className="emergency-card">
-      <p className="urgency-label">Экстренно · 103/112</p>
+      <p className="urgency-label">Экстренно</p>
       <h1 ref={heading} tabIndex={-1}>Вызовите скорую помощь</h1>
+      <section aria-label="Причина экстренной остановки">
+        <h2>Почему опрос остановлен</h2>
+        <p style={{ whiteSpace: 'pre-wrap' }}>{flow.survey?.result?.analysis || flow.survey?.result?.rationale || 'В ответах обнаружены критические признаки.'}</p>
+      </section>
       <p className="emergency-message" role="alert">Вызовите скорую помощь (103/112). Не ждите окончания опроса.</p>
-      {flow.survey?.result?.rationale && <p>{flow.survey.result.rationale}</p>}
       <div className="emergency-actions">
         <a className="button button--primary" href="tel:103"><Icon name="phone" /><span>Позвонить 103</span></a>
         <a className="button button--secondary" href="tel:112"><Icon name="phone" /><span>Позвонить 112</span></a>

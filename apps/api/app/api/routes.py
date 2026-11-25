@@ -51,6 +51,14 @@ async def get_session(
     return await request.app.state.sessions.get(session_id, owner)
 
 
+@router.post("/api/v1/sessions/{session_id}/emergency-explanation", response_model=SessionResponse, tags=["sessions"])
+async def explain_emergency_session(
+    session_id: UUID, request: Request, owner: str = Depends(get_principal),
+) -> SessionResponse:
+    await request.app.state.launch_limiter.check("emergency-explanation:" + owner)
+    return await request.app.state.sessions.explain_emergency(session_id, owner)
+
+
 @router.post("/api/v1/sessions/{session_id}/answers", response_model=SessionResponse, tags=["sessions"])
 async def answer_session(
     session_id: UUID, body: AnswerRequest, request: Request, owner: str = Depends(get_principal),

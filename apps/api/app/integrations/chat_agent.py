@@ -127,6 +127,10 @@ class ChatAgent:
     def __init__(self, client: GroqClient):
         self.client = client
 
+    async def explain_emergency(self, codes: list[str]) -> str:
+        from app.integrations.emergency_explanation import explain_emergency
+        return await explain_emergency(self.client, codes)
+
     async def analyze(self, answers: dict) -> SurveyAnalysis:
         safe_answers = scrub_data(answers)
         raw = await self.client.respond([
@@ -186,6 +190,10 @@ class ChatAgent:
 
 class MockChatAgent:
     """Offline clarification only; never sends questionnaire data to Groq."""
+
+    async def explain_emergency(self, codes: list[str]) -> str:
+        from app.integrations.emergency_explanation import fallback_reason
+        return fallback_reason(codes)
 
     async def analyze(self, answers: dict) -> SurveyAnalysis:
         return SurveyAnalysis(

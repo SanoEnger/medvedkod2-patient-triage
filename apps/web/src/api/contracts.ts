@@ -49,6 +49,7 @@ export interface SurveyClient {
   answer(id: string, answer: AnswerRequest, signal?: AbortSignal): Promise<Survey>
   back(id: string, target: number, signal?: AbortSignal): Promise<Survey>
   triage(id: string, signal?: AbortSignal): Promise<Triage>
+  explainEmergency?(id: string, signal?: AbortSignal): Promise<Survey>
   delete(id: string, signal?: AbortSignal): Promise<void>
 }
 export function isEmergency(value: Pick<Survey, 'status' | 'emergency' | 'urgency' | 'result'>): boolean {

@@ -125,6 +125,37 @@ describe('questionnaire UI', () => {
     expect(screen.getByRole('heading', { name: 'Вызовите скорую помощь' })).toBeVisible()
   })
 
+  test('emergency numbers are visible before the model reason arrives, then reason appears before them', async () => {
+    const client = createMockClient('emergency')
+    let resolve!: (survey: Survey) => void
+    let emergency!: Survey
+    const answer = client.answer
+    client.answer = async (...args) => { emergency = await answer(...args); return emergency }
+    client.explainEmergency = vi.fn(() => new Promise<Survey>(done => { resolve = done }))
+    const { user } = mount(client)
+    await consent(user); await primary(user)
+    await screen.findByRole('heading', { name: 'Вызовите скорую помощь' })
+    expect(screen.getByRole('link', { name: 'Позвонить 103' })).toBeVisible()
+    expect(screen.getByRole('region', { name: 'Причина экстренной остановки' })).toBeVisible()
+    const text = 'Опрос остановлен из-за указанной боли в груди.'
+    await act(async () => { resolve({ ...emergency, result: { ...emergency.result!, analysis: text, analysis_source: 'groq' } }) })
+    const reason = await screen.findByText(text)
+    const numbers = screen.getByRole('alert')
+    expect(reason.compareDocumentPosition(numbers) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Продолжить' })).not.toBeInTheDocument()
+  })
+
+  test('an explanation failure keeps the emergency screen and fallback reason', async () => {
+    const client = createMockClient('emergency')
+    client.explainEmergency = vi.fn().mockRejectedValue(new ApiError(503))
+    const { user } = mount(client)
+    await consent(user); await primary(user)
+    await screen.findByRole('heading', { name: 'Вызовите скорую помощь' })
+    expect(screen.getByRole('region', { name: 'Причина экстренной остановки' })).toBeVisible()
+    expect(screen.getByRole('link', { name: 'Позвонить 112' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Продолжить' })).not.toBeInTheDocument()
+  })
+
   test('unknown result requests clarification and never suggests self-care', async () => {
     const { user } = mount(createMockClient('unknown'))
     await complete(user)
@@ -299,6 +330,21 @@ test('late completion of an abandoned request cannot overwrite a new session', a
   expect(result.current.survey?.id).toBe(newer)
   expect(result.current.emergency).toBe(false)
   await waitFor(() => expect(result.current.busy).toBe(false))
+})
+
+test('a late explanation of a restored emergency cannot resurrect a reset session', async () => {
+  const client = createMockClient('emergency')
+  const session = await client.create()
+  const stopped = await client.answer(session.id, {
+    question_key: 'primary_complaint', value: { category: 'pain', text: 'Боль в груди' }, idempotency_key: crypto.randomUUID(),
+  })
+  let resolve!: (survey: Survey) => void
+  client.explainEmergency = vi.fn(() => new Promise<Survey>(done => { resolve = done }))
+  const { result } = renderHook(() => useQuestionnaire(client, stopped))
+  act(() => { result.current.reset() })
+  await act(async () => { resolve(stopped) })
+  expect(result.current.survey).toBeNull()
+  expect(result.current.emergency).toBe(false)
 })
 
 test('a missing API at creation is not presented as an expired existing session', async () => {
