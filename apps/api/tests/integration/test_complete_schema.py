@@ -66,6 +66,12 @@ async def test_complete_schema_indexes_and_rules(engine, db):
         "safety_rule_versions",
         "audit_events",
         "integration_nonces",
+        "clinic_organizations",
+        "clinic_branches",
+        "clinic_payments",
+        "clinic_addresses",
+        "clinic_sources",
+        "clinic_oms_participants",
     }
     assert any(index["column_names"] == ["created_at"] for index in audit_indexes)
     await verify_runtime_catalog(db, cipher())

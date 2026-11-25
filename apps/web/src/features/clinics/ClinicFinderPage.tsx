@@ -132,7 +132,7 @@ export function ClinicFinderPage({ client, initialSpecialty, initialPatientGroup
       if (!Number.isFinite(coords.accuracy) || coords.accuracy > 1000) {
         setLocationError('Точность местоположения ниже 1 км. Введите адрес вручную.')
       } else {
-        useLocationPoint({ lat: coords.latitude, lon: coords.longitude }, 'geolocation')
+        selectLocationPoint({ lat: coords.latitude, lon: coords.longitude }, 'geolocation')
       }
     }, (failure) => {
       if (controller.signal.aborted) return
@@ -176,7 +176,7 @@ export function ClinicFinderPage({ client, initialSpecialty, initialPatientGroup
     setPicking(true)
   }
 
-  function useLocationPoint(point: Coordinates, source: 'geolocation' | 'map') {
+  function selectLocationPoint(point: Coordinates, source: 'geolocation' | 'map') {
     resetLocation()
     setAddress('')
     setLocation({ source, point })
@@ -296,7 +296,7 @@ export function ClinicFinderPage({ client, initialSpecialty, initialPatientGroup
     <div className={showMap && !picking && (items?.length || refreshingMap) ? 'clinic-results' : undefined}>
       {showMap && <ClinicMap items={picking ? noItems : items ?? noItems} selection={picking ? undefined : selectedItem}
         picking={picking} origin={location?.point} ready={mapStatus === 'ready'}
-        onSelect={selectOnMap} onStatus={setMapStatus} onPoint={(point) => useLocationPoint(point, 'map')}
+        onSelect={selectOnMap} onStatus={setMapStatus} onPoint={(point) => selectLocationPoint(point, 'map')}
         onCancel={() => setPicking(false)} />}
       {!picking && items && items.length > 0 && <div className="clinic-results-list">
         {mapStatus === 'loading' && <p role="status">Загружаем карту…</p>}

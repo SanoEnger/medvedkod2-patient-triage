@@ -234,6 +234,28 @@ async def test_emergency_persists_across_restart(api):
         assert (await client.post(path + "/back", json={"target_step": 0})).status_code == 409
 
 
+async def test_emergency_explanation_is_encrypted_and_survives_restart(api):
+    connect, factory = api
+    async with connect() as client:
+        sid = await create(client)
+        path = f"/api/v1/sessions/{sid}"
+        stopped = await client.post(path + "/answers", json=payload(value={"category": "pain", "text": "Боль в груди"}))
+        assert stopped.json()["emergency"]
+        explanation = await client.post(path + "/emergency-explanation")
+        assert explanation.status_code == 200
+        reason = explanation.json()
+        assert reason["emergency"] and reason["result"]["analysis_source"] == "mock"
+        assert "боль" in reason["result"]["analysis"]
+    async with connect() as client:
+        assert (await client.get(path)).json() == reason
+        assert (await client.post(path + "/emergency-explanation")).json() == reason
+    async with connect(OTHER) as client:
+        assert (await client.post(path + "/emergency-explanation")).status_code == 403
+    async with factory() as db:
+        row = await db.scalar(select(TriageResultRecord).where(TriageResultRecord.session_id == UUID(sid)))
+        assert "из-за" not in json.dumps(row.details_jsonb, ensure_ascii=False)
+
+
 async def test_history_list_ownership_pagination_expiry_and_delete(api):
     connect, factory = api
     async with connect() as client:

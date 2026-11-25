@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError } from '../../api/client'
 import { isEmergency } from '../../api/contracts'
 import type { AnswerRequest, Survey, SurveyClient } from '../../api/contracts'
@@ -22,7 +22,7 @@ export function useQuestionnaire(client: SurveyClient, initial?: Survey | null) 
 
   useEffect(() => () => { epoch.current++; abort.current?.abort() }, [client])
 
-  function emit(next: Survey) {
+  const emit = useCallback((next: Survey) => {
     if (stopped.current && !isEmergency(next)) return
     if (isEmergency(next)) {
       stopped.current = true
@@ -31,7 +31,19 @@ export function useQuestionnaire(client: SurveyClient, initial?: Survey | null) 
     current.current = next
     setSurvey(next)
     if (next.status === 'EXPIRED' && !stopped.current) setError(new ApiError(404))
-  }
+  }, [])
+
+  const initialId = initial?.id
+  const initialEmergency = !!initial && isEmergency(initial)
+  useEffect(() => {
+    if (!initialId || !initialEmergency || !client.explainEmergency) return
+    const controller = new AbortController()
+    const generation = epoch.current
+    void client.explainEmergency(initialId, controller.signal).then(next => {
+      if (!controller.signal.aborted && epoch.current === generation) emit(next)
+    }).catch(() => { /* The emergency screen and fallback reason remain visible. */ })
+    return () => controller.abort()
+  }, [client, initialId, initialEmergency, emit])
 
   async function run(operation: Operation): Promise<boolean> {
     if (busy.current) return false
@@ -87,7 +99,13 @@ export function useQuestionnaire(client: SurveyClient, initial?: Survey | null) 
     const snapshot = structuredClone({ ...body, idempotency_key: crypto.randomUUID() }) as AnswerRequest
     return run({ kind: 'answer', async execute(signal, update) {
       const accepted = await client.answer(id, snapshot, signal)
-      if (snapshot.question_key !== 'medical_history' || isEmergency(accepted)) return accepted
+      if (isEmergency(accepted)) {
+        update(accepted) // Never wait for the explanation before showing the emergency numbers.
+        if (!client.explainEmergency) return accepted
+        try { return await client.explainEmergency(id, signal) }
+        catch { return accepted }
+      }
+      if (snapshot.question_key !== 'medical_history') return accepted
       // Do not render the preliminary rule result while the final card is loading.
       const result = await client.triage(id, signal)
       const completed = await client.get(id, signal)

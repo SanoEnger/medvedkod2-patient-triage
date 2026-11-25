@@ -26,6 +26,7 @@ from app.schemas.survey import (
     TriageResponse,
 )
 from app.services.safety import answer_text, find_emergency_rules
+from app.integrations.emergency_explanation import fallback_reason
 
 EMERGENCY_MESSAGE = "Вызовите скорую помощь (103/112). Не ждите окончания опроса."
 DISCLAIMER = (
@@ -110,13 +111,16 @@ class SessionService:
     def _serialize(survey: Survey) -> SessionResponse:
         current = QUESTIONS[len(survey.answers)] if survey.status == SurveyStatus.COLLECTING else None
         is_emergency = survey.status == SurveyStatus.EMERGENCY_STOP
+        result = survey.result
+        if is_emergency and result:
+            result = {**result, "rationale": fallback_reason(survey.rule_codes)}
         return SessionResponse(
             id=survey.id, status=survey.status, state=survey.status,
             progress=SessionService._progress(survey), current_question=current, next_question=current,
             expires_at=survey.expires_at.isoformat(), emergency=is_emergency,
             urgency="EMERGENCY" if is_emergency else None,
             message=EMERGENCY_MESSAGE if is_emergency else None,
-            matched_rule_codes=survey.rule_codes.copy(), result=survey.result, nlp=survey.nlp.copy(),
+            matched_rule_codes=survey.rule_codes.copy(), result=result, nlp=survey.nlp.copy(),
             answers=survey.answers.copy(),
         )
 
@@ -295,3 +299,24 @@ class SessionService:
 
     async def delete(self, session_id: UUID, owner_id: str) -> None:
         await self._store.delete(session_id, owner_id)
+
+    async def explain_emergency(self, session_id: UUID, owner_id: str) -> SessionResponse:
+        async with self._store.open(session_id, owner_id) as survey:
+            if survey.status != SurveyStatus.EMERGENCY_STOP or not survey.result:
+                raise HTTPException(status_code=409, detail="session_not_emergency")
+            if survey.result.get("analysis_source"):
+                return self._serialize(survey)
+            codes = survey.rule_codes.copy()
+        text, source = None, "unavailable"
+        if self._analyst is not None and hasattr(self._analyst, "explain_emergency"):
+            try:
+                text = await self._analyst.explain_emergency(codes)
+                source = self._analysis_source
+            except GroqError as error:
+                event("survey.emergency_explanation_failed", code=error.code)
+        async with self._store.open(session_id, owner_id) as survey:
+            if survey.status != SurveyStatus.EMERGENCY_STOP or survey.rule_codes != codes:
+                raise HTTPException(status_code=409, detail="questionnaire_changed")
+            if not survey.result.get("analysis_source"):
+                survey.result = {**survey.result, "analysis": text, "analysis_source": source}
+            return self._serialize(survey)

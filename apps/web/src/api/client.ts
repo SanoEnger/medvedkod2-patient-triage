@@ -203,6 +203,7 @@ export function createApiClient(mode: 'demo' | 'max', onAuthorizationExpired?: (
     },
     create: async (signal) => parseSurvey(await call('/api/v1/sessions', 'POST', { accepted_disclaimer: true }, signal)),
     get: async (id, signal) => parseSurvey(await call(path(id), 'GET', undefined, signal)),
+    explainEmergency: async (id, signal) => parseSurvey(await call(path(id) + '/emergency-explanation', 'POST', {}, signal)),
     answer: async (id, body, signal) => parseSurvey(await call(path(id) + '/answers', 'POST', body, signal)),
     back: async (id, target, signal) => parseSurvey(await call(path(id) + '/back', 'POST', { target_step: target }, signal)),
     triage: async (id, signal) => parseTriage(await call(path(id) + '/triage', 'POST', {}, signal)),
