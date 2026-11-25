@@ -8,6 +8,21 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.integrations.groq.schemas import ExtractionResult
 
+ReferralSpecialty = Literal[
+    "Терапевт", "Педиатр", "Невролог", "Дерматолог", "Гастроэнтеролог",
+    "Оториноларинголог", "Офтальмолог", "Травматолог-ортопед", "Хирург",
+    "Кардиолог", "Пульмонолог", "Уролог", "Гинеколог", "Эндокринолог",
+    "Аллерголог-иммунолог", "Стоматолог",
+]
+
+
+ReferralSpecialty = Literal[
+    "Терапевт", "Педиатр", "Невролог", "Дерматолог", "Гастроэнтеролог",
+    "Оториноларинголог", "Офтальмолог", "Травматолог-ортопед", "Хирург",
+    "Кардиолог", "Пульмонолог", "Уролог", "Гинеколог", "Эндокринолог",
+    "Аллерголог-иммунолог", "Стоматолог",
+]
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)

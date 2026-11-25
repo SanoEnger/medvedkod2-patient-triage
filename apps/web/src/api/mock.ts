@@ -49,6 +49,7 @@ export function createMockClient(scenario: DemoScenario = 'planned'): SurveyClie
       }
       const survey = stored.survey
       if (survey.status !== 'COLLECTING' || survey.current_question !== answer.question_key) throw new ApiError(409)
+      survey.answers = { ...survey.answers, [answer.question_key]: clone(answer.value) }
       advance(survey, survey.progress.answered + 1)
       // Fixtures select outcomes explicitly; medical input is never interpreted in the browser.
       if (scenario === 'emergency') {
@@ -65,6 +66,9 @@ export function createMockClient(scenario: DemoScenario = 'planned'): SurveyClie
     async back(id, target) {
       const stored = find(id)
       if (stored.survey.emergency || target < 0 || target >= stored.survey.progress.answered) throw new ApiError(409)
+      if (stored.survey.answers) {
+        for (const key of QUESTIONS.slice(target)) delete stored.survey.answers[key]
+      }
       advance(stored.survey, target)
       stored.survey.result = null
       stored.replay.clear()

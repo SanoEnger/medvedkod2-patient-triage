@@ -217,7 +217,8 @@ class ChatService:
             value = self.content(row)
             messages.append(ChatMessage(id=row.id, role=row.role, text=value["text"],
                 created_at=row.created_at.isoformat(), emergency=value.get("emergency", False),
-                client_message_id=value.get("client_message_id")))
+                client_message_id=value.get("client_message_id"),
+                clinic_specialty=value.get("clinic_specialty") if row.role == "assistant" else None))
             if row.role == "user":
                 pending = True
                 retryable = value.get("processing_until", 0) <= datetime.now(UTC).timestamp()

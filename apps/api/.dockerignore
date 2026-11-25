@@ -6,6 +6,8 @@
 !alembic/
 !alembic/**
 !alembic.ini
+!clinic_catalog/
+!clinic_catalog/kurgan-osm.json.gz
 **/__pycache__
 **/*.pyc
 **/.env*

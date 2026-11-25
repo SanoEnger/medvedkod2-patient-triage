@@ -7,6 +7,7 @@ export interface ChatMessage {
   created_at: string
   emergency: boolean
   client_message_id?: string | null
+  clinic_specialty?: string | null
 }
 export interface Conversation {
   id: string

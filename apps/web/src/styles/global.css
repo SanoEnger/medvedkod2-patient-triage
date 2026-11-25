@@ -210,6 +210,7 @@ form { margin-top: 28px; }
 .chat-message--user { justify-self: end; background: var(--surface-secondary); }
 .chat-author { font-weight: 600; font-size: var(--font-caption); margin-bottom: 6px; }
 .chat-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-clinic-action { margin-top: 12px; }
 .chat-composer { display: grid; gap: 10px; margin-top: 24px; }
 .chat-composer > label { font-size: var(--font-label); font-weight: 600; }
 .chat-composer textarea { font: inherit; font-size: var(--font-field); line-height: var(--text-line-height); width: 100%; min-width: 0; min-height: 120px; resize: vertical; border: 1px solid var(--border); border-radius: 12px; padding: 14px; color: var(--heading); background: var(--card); }

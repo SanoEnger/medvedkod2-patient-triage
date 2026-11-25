@@ -80,6 +80,7 @@ services:
       context: ./apps/web
       args:
         VITE_HOST_MODE: ${VITE_HOST_MODE:-demo}
+        VITE_YANDEX_TILES_API_KEY: ${VITE_YANDEX_TILES_API_KEY:-}
     ports:
       - "127.0.0.1:${WEB_HTTPS_PORT:-8443}:8443"
     volumes:

@@ -2,9 +2,10 @@ import { clearAppSession, getAppSession } from '../max/host'
 import { QUESTIONS } from './contracts'
 import type { Survey, SurveyClient, Triage } from './contracts'
 import type { ChatClient, ChatHistory, Conversation } from './chat'
+import type { AddressCandidate, ClinicSearchResult, ClinicsClient } from './clinics'
 
 export type TranscribeAudio = (audio: Blob, signal: AbortSignal) => Promise<string>
-export interface MedvedClient extends SurveyClient { chat: ChatClient; transcribe?: TranscribeAudio }
+export interface MedvedClient extends SurveyClient { chat: ChatClient; clinics: ClinicsClient; transcribe?: TranscribeAudio }
 
 export class ApiError extends Error {
   constructor(public readonly status = 0, public readonly emergency = false, public readonly invalidResponse = false,
@@ -12,12 +13,14 @@ export class ApiError extends Error {
     super('SURVEY_API_ERROR')
   }
 }
-const chatErrorCodes = new Set([
+const publicErrorCodes = new Set([
   'questionnaire_in_progress', 'questionnaire_not_completed', 'chat_reply_pending', 'chat_turn_pending',
   'chat_emergency_stop', 'chat_message_limit', 'idempotency_conflict', 'questionnaire_changed',
+  'clinic_addresses_unavailable', 'clinic_outside_pilot',
 ])
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every((entry) => typeof entry === 'string')
+const insurer = (value: unknown) => object(value) && typeof value.id === 'string' && typeof value.name === 'string'
 const nullableText = (value: unknown) => value === null || typeof value === 'string'
 const uuid = (value: unknown) => typeof value === 'string' && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(value)
 const date = (value: unknown) => typeof value === 'string' && Number.isFinite(Date.parse(value))
@@ -66,7 +69,8 @@ export function parseChat(value: unknown): Conversation {
     || value.messages.some((entry) => !object(entry) || !uuid(entry.id) || !['user', 'assistant'].includes(String(entry.role))
       || typeof entry.text !== 'string' || !entry.text || entry.text.length > 6000
       || typeof entry.created_at !== 'string' || !Number.isFinite(Date.parse(entry.created_at))
-      || typeof entry.emergency !== 'boolean' || !(entry.client_message_id == null || uuid(entry.client_message_id)))) {
+      || typeof entry.emergency !== 'boolean' || !(entry.client_message_id == null || uuid(entry.client_message_id))
+      || !(entry.clinic_specialty === undefined || nullableText(entry.clinic_specialty)))) {
     throw new ApiError(0, emergencyHint(value), true)
   }
   if (value.result !== null) parseTriage(value.result)
@@ -114,7 +118,7 @@ export function createApiClient(mode: 'demo' | 'max', onAuthorizationExpired?: (
     let value: unknown
     try { value = await response.json() } catch { throw new ApiError(response.status, false, true) }
     if (!response.ok) {
-      const code = object(value) && typeof value.detail === 'string' && chatErrorCodes.has(value.detail) ? value.detail : undefined
+      const code = object(value) && typeof value.detail === 'string' && publicErrorCodes.has(value.detail) ? value.detail : undefined
       throw new ApiError(response.status, emergencyHint(value), false, code)
     }
     return value
@@ -140,8 +144,40 @@ export function createApiClient(mode: 'demo' | 'max', onAuthorizationExpired?: (
   async function call(path: string, method: string, body?: unknown, signal?: AbortSignal) {
     return request(path, method, body, signal, await token())
   }
+  function geocodeResult(value: unknown, limit: number) {
+    if (!object(value) || !Array.isArray(value.candidates) || value.candidates.length > limit || value.candidates.some((candidate) =>
+      !object(candidate) || typeof candidate.city !== 'string' || typeof candidate.label !== 'string'
+      || !Number.isFinite(candidate.lat) || !Number.isFinite(candidate.lon))) throw new ApiError(0, false, true)
+    return { candidates: value.candidates as AddressCandidate[] }
+  }
   const path = (id: string) => '/api/v1/sessions/' + encodeURIComponent(id)
   return {
+    clinics: {
+      geocode: async (address, signal) => geocodeResult(await call('/api/v1/clinics/geocode', 'POST', { address }, signal), 8),
+      reverseGeocode: async (point, signal) => geocodeResult(await call('/api/v1/clinics/reverse-geocode', 'POST', point, signal), 1),
+      search: async (query, signal) => {
+        const value = await call('/api/v1/clinics/search', 'POST', query, signal)
+        if (!object(value) || !Array.isArray(value.items) || value.items.length > 50 || !Array.isArray(value.insurers)
+          || value.items.some((item) => !object(item) || typeof item.id !== 'string' || typeof item.name !== 'string'
+            || typeof item.address !== 'string' || !Number.isFinite(item.lat) || !Number.isFinite(item.lon)
+            || !Number.isFinite(item.distance_km) || !['public', 'private'].includes(String(item.kind)) || !strings(item.phones)
+            || !nullableText(item.website) || !nullableText(item.booking_url) || !nullableText(item.gosuslugi_url)
+            || (item.poliklinika45_url !== undefined && !nullableText(item.poliklinika45_url))
+            || (item.specialties !== undefined && !strings(item.specialties))
+            || (item.oms_needs_confirmation !== undefined && typeof item.oms_needs_confirmation !== 'boolean')
+            || (item.sources !== undefined && (!Array.isArray(item.sources) || item.sources.some((source) =>
+              !object(source) || typeof source.name !== 'string' || typeof source.url !== 'string'
+              || (source.updated_at !== null && !date(source.updated_at)))))
+            || typeof item.gosuslugi_select_branch !== 'boolean' || typeof item.demo !== 'boolean' || !Array.isArray(item.payments)
+            || item.payments.some((payment) => !object(payment) || !['oms', 'dms', 'paid'].includes(String(payment.method))
+              || typeof payment.specialty_code !== 'string' || !nullableText(payment.program)
+              || (payment.insurer !== null && !insurer(payment.insurer))))
+          || !value.insurers.every(insurer)) {
+          throw new ApiError(0, false, true)
+        }
+        return value as ClinicSearchResult
+      },
+    },
     transcribe: async (audio, signal) => {
       const value = await call('/api/v1/voice/transcriptions', 'POST', audio, signal)
       if (!object(value) || typeof value.text !== 'string' || !value.text.trim()) throw new ApiError(0, false, true)
