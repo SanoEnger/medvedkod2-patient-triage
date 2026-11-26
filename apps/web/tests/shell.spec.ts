@@ -1,0 +1,79 @@
+import { expect, test } from '@playwright/test'
+import { apiFixture } from './fixtures/survey'
+
+test.beforeEach(async ({ page }, info) => {
+  await apiFixture(page, { scenario: info.title.startsWith('emergency') ? 'emergency' : 'planned' })
+})
+
+test('loading, temporary failure and retry', async ({ page }) => {
+  await page.goto('/?demo=error-once')
+  await expect(page.getByRole('status')).toHaveText('Подождите немного…')
+  await expect(page.getByRole('alert')).toContainText('Не удалось открыть приложение')
+  await page.getByRole('button', { name: 'Попробовать снова' }).click()
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Привет, я МедВед')
+  await expect(page.getByText('Демоверсия', { exact: true })).toHaveCount(0)
+})
+
+for (const [width, height] of [[360, 640], [390, 844], [768, 1024], [1440, 900]]) {
+  test('questionnaire layout and back at ' + width + 'x' + height, async ({ page }) => {
+    await page.setViewportSize({ width, height })
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Начать опрос', exact: true }).click()
+    await expect(page.getByRole('heading', { level: 1 })).toBeFocused()
+    await page.getByRole('checkbox', { name: /Я понимаю/ }).check()
+    await page.getByRole('button', { name: 'Начать опрос', exact: true }).click()
+    await page.getByRole('radio', { name: 'Кожа', exact: true }).check()
+    await page.getByLabel('Что беспокоит — своими словами').fill('Synthetic test text')
+    await page.getByRole('button', { name: 'Продолжить' }).click()
+    await expect(page.getByRole('heading', { level: 1 })).toBeFocused()
+    if (width >= 768) {
+      const age = await page.getByLabel('Возраст в полных годах').boundingBox()
+      const sex = await page.getByLabel('Пол', { exact: true }).boundingBox()
+      expect(Math.abs(age!.y - sex!.y)).toBeLessThan(2)
+    }
+    await page.getByRole('button', { name: 'Назад', exact: true }).click()
+    await expect(page.getByLabel('Что беспокоит — своими словами')).toHaveValue('Synthetic test text')
+    await expect(page.getByRole('radio', { name: 'Кожа', exact: true })).toBeChecked()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await page.getByRole('button', { name: 'На главную' }).click()
+    await expect(page.getByRole('heading', { level: 1 })).toBeFocused()
+    expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0)
+  })
+}
+
+test('keyboard navigation, consent and visible focus', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.getByRole('button', { name: 'Начать опрос', exact: true })).toBeVisible()
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('link', { name: 'Перейти к содержимому' })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('button', { name: 'Версия для слабовидящих', exact: true })).toBeFocused()
+  await page.keyboard.press('Tab')
+  const start = page.getByRole('button', { name: 'Начать опрос', exact: true })
+  await expect(start).toBeFocused()
+  expect(await start.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe('solid')
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('heading', { level: 1 })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('checkbox', { name: /Я понимаю/ })).toBeFocused()
+  await page.keyboard.press('Space')
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('heading', { name: 'Что вас беспокоит?' })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('radio', { name: 'Боль', exact: true })).toBeFocused()
+})
+
+test('fields stay reachable with a shortened viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Начать опрос', exact: true }).click()
+  await page.getByRole('checkbox', { name: /Я понимаю/ }).check()
+  await page.getByRole('button', { name: 'Начать опрос', exact: true }).click()
+  await page.setViewportSize({ width: 390, height: 380 })
+  await page.getByRole('radio', { name: 'Кожа', exact: true }).check()
+  await page.getByLabel('Что беспокоит — своими словами').fill('Synthetic keyboard example')
+  await page.getByRole('button', { name: 'Продолжить' }).click()
+  await expect(page.getByLabel('Возраст в полных годах')).toBeVisible()
+})

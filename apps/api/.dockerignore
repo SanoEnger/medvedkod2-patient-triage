@@ -1,0 +1,13 @@
+*
+!requirements-backend.txt
+!requirements-voice.txt
+!app/
+!app/**
+!alembic/
+!alembic/**
+!alembic.ini
+!clinic_catalog/
+!clinic_catalog/kurgan-osm.json.gz
+**/__pycache__
+**/*.pyc
+**/.env*
