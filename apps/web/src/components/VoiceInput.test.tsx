@@ -56,33 +56,32 @@ test('recording state is pressed only during capture and transcript appends to t
 })
 
 test.each([
-  ['NotAllowedError', 'Доступ к микрофону не разрешён'],
-  ['NotFoundError', 'Микрофон не найден'],
-  ['NotReadableError', 'Не удалось открыть микрофон'],
-])('capture failure %s is distinguished without exposing exception text', async (name, message) => {
+  ['NotAllowedError'],
+  ['NotFoundError'],
+  ['NotReadableError'],
+])('capture failure %s shows only the unavailable message', async (name) => {
   vi.stubGlobal('MediaRecorder', Recorder)
   vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: vi.fn().mockRejectedValue(new DOMException('private-message-and-token', name)) } })
   const transcribe = vi.fn()
   render(<VoiceInput label="Ответ" value="" onChange={vi.fn()} maxLength={100} transcribe={transcribe}><textarea /></VoiceInput>)
   await userEvent.click(screen.getByRole('button', { name: 'Голосовой ввод' }))
-  expect(screen.getByRole('alert')).toHaveTextContent(message)
-  expect(screen.getByText(/Этап:/)).toHaveTextContent('Этап: доступ к микрофону')
-  expect(screen.getByText(/Этап:/)).toHaveTextContent('Код: ' + name)
+  expect(screen.getByRole('alert')).toHaveTextContent('Микрофон недоступен.')
+  expect(document.querySelector('details')).toBeNull()
   expect(document.body.textContent).not.toContain('private-message-and-token')
   expect(transcribe).not.toHaveBeenCalled()
 })
 
-test('an actual denied page policy is reported separately from user permission', async () => {
+test('a denied page policy shows only the unavailable message', async () => {
   Object.defineProperty(document, 'featurePolicy', { configurable: true, value: { allowsFeature: (feature: string) => feature !== 'microphone' } })
   vi.stubGlobal('MediaRecorder', Recorder)
   vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: vi.fn().mockRejectedValue(new DOMException('', 'NotAllowedError')) } })
   render(<VoiceInput label="Ответ" value="" onChange={vi.fn()} maxLength={100} transcribe={vi.fn()}><textarea /></VoiceInput>)
   await userEvent.click(screen.getByRole('button', { name: 'Голосовой ввод' }))
-  expect(screen.getByRole('alert')).toHaveTextContent('Доступ к микрофону запрещён настройками страницы mini-app')
-  expect(screen.getByText(/Этап:/)).toHaveTextContent('Политика страницы: запрещает микрофон')
+  expect(screen.getByRole('alert')).toHaveTextContent('Микрофон недоступен.')
+  expect(document.querySelector('details')).toBeNull()
 })
 
-test.each(['constructor', 'start'])('a recorder %s failure releases the microphone and does not blame permission', async (stage) => {
+test.each(['constructor', 'start'])('a recorder %s failure releases the microphone and shows the unavailable message', async (stage) => {
   class BrokenRecorder extends Recorder {
     constructor() { super(); if (stage === 'constructor') throw new DOMException('', 'NotSupportedError') }
     start() { throw new DOMException('', 'NotSupportedError') }
@@ -94,14 +93,14 @@ test.each(['constructor', 'start'])('a recorder %s failure releases the micropho
   render(<VoiceInput label="Ответ" value="" onChange={vi.fn()} maxLength={100} transcribe={transcribe}><textarea /></VoiceInput>)
   const microphone = screen.getByRole('button', { name: 'Голосовой ввод' })
   await userEvent.click(microphone)
-  expect(screen.getByRole('alert')).toHaveTextContent('Браузер получил микрофон')
-  expect(screen.getByText(/Этап:/)).toHaveTextContent(stage === 'constructor' ? 'создание записи' : 'запуск записи')
+  expect(screen.getByRole('alert')).toHaveTextContent('Микрофон недоступен.')
+  expect(document.querySelector('details')).toBeNull()
   expect(microphone).toHaveAttribute('aria-pressed', 'false')
   expect(stop).toHaveBeenCalledOnce()
   expect(transcribe).not.toHaveBeenCalled()
 })
 
-test('a successful retry clears capture diagnostics', async () => {
+test('a successful retry clears the microphone error', async () => {
   vi.stubGlobal('MediaRecorder', Recorder)
   const getUserMedia = vi.fn().mockRejectedValueOnce(new DOMException('', 'NotAllowedError'))
     .mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] })
@@ -137,10 +136,10 @@ test.each([false, true])('MAX permission precedes browser capture (already initi
 })
 
 test.each([
-  ['mic_app_permission_denied', 'Разрешите микрофон этому mini-app'],
-  ['mic_system_permission_denied', 'Разрешите MAX доступ к микрофону'],
-  ['mic_not_supported', 'MAX не обнаружил доступный микрофон'],
-])('MAX %s stops before browser capture', async (reason, message) => {
+  ['mic_app_permission_denied'],
+  ['mic_system_permission_denied'],
+  ['mic_not_supported'],
+])('MAX %s stops before browser capture', async (reason) => {
   Object.defineProperty(window, 'WebApp', { configurable: true, value: { PermissionsManager: {
     isInited: true, requestAccess: vi.fn().mockRejectedValue({ error: { code: 'client.permissions_request_access.' + reason, message: 'private-sdk-response' } }),
   } } })
@@ -149,7 +148,7 @@ test.each([
   vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } })
   render(<VoiceInput label="Ответ" value="" onChange={vi.fn()} maxLength={100} transcribe={vi.fn()}><textarea /></VoiceInput>)
   await userEvent.click(screen.getByRole('button', { name: 'Голосовой ввод' }))
-  expect(screen.getByRole('alert')).toHaveTextContent(message)
+  expect(screen.getByRole('alert')).toHaveTextContent('Микрофон недоступен.')
   expect(document.body.textContent).not.toContain('private-sdk-response')
   expect(getUserMedia).not.toHaveBeenCalled()
 })
