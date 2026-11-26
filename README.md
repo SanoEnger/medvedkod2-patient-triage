@@ -1,133 +1,232 @@
 # МедВед — навигатор пациента
 
-Рабочая интеграционная ветка — `develop`. `main` предназначена для проверенного
-релиза. Здесь собраны React-оболочка, FastAPI backend, детерминированные правила
-безопасности, MAX server-to-server adapter и автономный Groq NLP-модуль.
+Хакатонный проект команды **Signalary**: предварительный опрос пациента, анализ ответов с Groq, помощь с выбором специалиста и поиск медицинских учреждений Кургана.
 
-Это демонстрационный прототип для синтетических данных. Frontend подключает
-backend для MAX-авторизации; SessionService использует NLP для свободных жалоб.
-Опросник подключён к API: согласие, пять шагов, возврат, экстренный экран и результат. PostgreSQL-хранилище с шифрованием и TLS подключено. Наличие компонентов в одной ветке
-не означает готовность медицинского сервиса или сквозной интеграции MAX.
+Это учебный прототип. Он не ставит диагноз и не заменяет врача; для демонстрации используйте вымышленные данные.
 
-На главной доступна «История чатов». Оттуда можно открыть или удалить
-сохранённую переписку, включая чат по завершённому опросу. История хранится
-в PostgreSQL до конца исходного срока обращения, максимум 24 часа. При
-повторном входе через MAX сервер показывает историю того же пользователя.
+## Возможности
 
-## Запуск всего проекта в Docker
+- Опрос из пяти шагов с возвратом к ответам и сохранением результата.
+- Проверка критических признаков, включая свободный текст на промежуточных шагах. При срабатывании — экстренная остановка с причиной и номерами экстренных служб.
+- Анализ завершённой анкеты и чат с МедВедом через Groq; ответы проходят серверную проверку.
+- История обращений и чатов с удалением пользователем. Срок хранения обращения ограничен 24 часами.
+- Поиск клиник по адресу, координатам, специальности, возрастной группе и способу оплаты; карта Яндекса с резервной подложкой OpenStreetMap.
+- Переход к внешнему сервису записи или звонку в клинику. Подтверждение записи происходит во внешнем сервисе.
+- Голосовой ввод с добавлением распознанного текста в черновик; версия для слабовидящих.
 
-Из корня репозитория:
+## Команда
 
-~~~powershell
-docker compose up --build -d
-~~~
+| Участник | Направление |
+| --- | --- |
+| Волосников Александр | Fullstack и ML |
+| Вахрушев Александр | Backend |
+| Смирнов Глеб | Frontend и SQL |
 
-Открыть https://localhost:8443. Инструкция по локальному сертификату, настройкам и сохранению данных — [Docker](docs/DOCKER.md).
+## Устройство проекта
 
-## Поиск поликлиник в Кургане
+| Путь | Содержимое |
+| --- | --- |
+| `apps/web` | React 19, TypeScript, Vite, Leaflet |
+| `apps/api/app` | FastAPI, авторизация MAX, опрос, чат, Groq, каталог клиник |
+| `apps/api/alembic` | Миграции PostgreSQL и версии правил безопасности |
+| `apps/api/clinic_catalog` | Адресный набор Кургана и запрос для его обновления |
+| `apps/api/tests`, `apps/web/tests` | Автоматические проверки и тестовые данные |
+| `compose.yaml` | Локальный стек: Nginx, API, PostgreSQL и подготовка секретов |
+| `docs` | Подробности [логирования](docs/LOGGING.md) и [защиты LLM](docs/PROMPT_SECURITY.md) |
 
-Из нового или сохранённого результата опроса в поиск переносятся специальность и возрастная группа пациента. Если в опросе возраст пропущен, выберите группу на экране поиска. Поиск сортирует подходящие филиалы по расстоянию от выбранного дома. Детские отделения доступны пациентам младше 18 лет. Для такого поиска в государственном каталоге учитываются филиалы с подтверждённым детским приёмом.
+## Локальный запуск в Docker
 
-Завершите опрос или откройте результат из истории, чтобы перейти к поиску. Адрес можно ввести вручную. Геолокация запрашивается по кнопке. Докер применяет миграции при старте. При запуске с существующим томом PostgreSQL каталог уже доступен.
+Нужны Docker Desktop с Linux-контейнерами и Docker Compose. Из корня проекта:
 
 ```powershell
 docker compose up --build -d --wait
+docker compose ps
 ```
 
-На чистой базе сначала загрузите адресный справочник, затем импортируйте открытые данные «Поликлиники45». Для восстановления вручную проверенных филиалов и условий приёма используйте резервную копию PostgreSQL с действующим каталогом.
+Откройте **https://localhost:8443**. При первом запуске создаются ключи, локальные TLS-сертификаты и таблицы БД. По умолчанию включены учебная авторизация и mock-режим NLP. Python, Node.js и PostgreSQL на компьютере для этого запуска не требуются.
+
+Для доверия локальному сертификату скопируйте публичный CA:
+
+```powershell
+New-Item -ItemType Directory -Force .local | Out-Null
+docker compose cp web:/run/web-secrets/ca.crt .local/docker-ca.crt
+curl.exe --cacert .local/docker-ca.crt https://localhost:8443/health
+```
+
+В Windows при необходимости установите его для текущего пользователя:
+
+```powershell
+Import-Certificate -FilePath .local/docker-ca.crt -CertStoreLocation Cert:\CurrentUser\Root
+```
+
+Это локальный CA, не сертификат публичного сайта. Приватные ключи остаются в Docker-томах. Сертификаты локальных сервисов действуют 30 дней.
+
+Для изменения параметров скопируйте корневой `.env.example` в `.env`. Он предназначен для Compose: внешний порт, режимы приложения, Groq и публичный ключ карты. Дополнительные серверные настройки можно хранить в `apps/api/.env`; корневой `.env` имеет приоритет при запуске общего стека. Реальные значения в Git не добавляются.
+
+```powershell
+docker compose logs --since 10m --tail 100 api web postgres
+docker compose stop
+docker compose up -d
+```
+
+`docker compose down` сохраняет тома. Ключ шифрования API нужно сохранять вместе с резервной копией БД: без него зашифрованные данные не восстановить. Параметр `-v` удаляет тома, поэтому для обычной остановки его не используйте.
+
+## Groq и голосовой ввод
+
+Для ответов модели задайте на сервере `NLP_MODE=live`, `GROQ_API_KEY` и `GROQ_MODEL`. Выберите модель с поддержкой JSON-ответов; на текущем размещении используется `openai/gpt-oss-120b`. `NLP_MODE=mock` позволяет работать без обращения к провайдеру.
+
+Для облачного распознавания речи используются `VOICE_PROVIDER=groq` и `GROQ_TRANSCRIPTION_MODEL=whisper-large-v3-turbo`; ключ Groq хранится только у API. Аудио передаётся провайдеру для распознавания, в БД не сохраняется.
+
+Для локального Whisper сначала скачайте модель, затем включите `INSTALL_VOICE=1` в корневом `.env` и пересоберите Docker-стек:
+
+```powershell
+python -m pip install -r apps/api/requirements-voice.txt
+python -c "from faster_whisper.utils import download_model; download_model('base', output_dir='.local/models/whisper-base')"
+docker compose up --build -d
+```
+
+Микрофон требует HTTPS и разрешения пользователя. Во вложенном mini-app MAX также нужно делегирование доступа со стороны родительских окон. Работа записи внутри MAX пока не подтверждена; при отказе интерфейс показывает «Микрофон недоступен.».
+
+## Каталог клиник и адресов
+
+Карта читает данные из PostgreSQL. Обновление Git или публикация Vercel не переносят содержимое локальной БД. В облачный каталог 26 ноября 2026 года загружены 8 131 адрес, 18 организаций и 41 филиал, а также условия оплаты и источники данных.
+
+На новой базе после запуска стека загрузите адресный справочник и открытые данные «Поликлиники45»:
 
 ```powershell
 docker compose exec api python -m app.container import-clinic-addresses /app/clinic_catalog/kurgan-osm.json.gz
 docker compose exec api python -m app.container import-poliklinika45 --live --report /tmp/poliklinika45-report.json
 ```
 
-Откройте `https://localhost:8443` и введите адрес дома пациента, например «Курган, ул. Кравченко, 53». От выбранного дома рассчитывается расстояние до филиалов. Для просмотра всех ближайших карточек можно убрать предустановленный фильтр специалиста или увеличить радиус. Проверьте фильтр «Платно» со специальностью «Дерматолог» на адресе «Курган, ул. Советская, 119». В базовом каталоге подтверждён платный приём по этому профилю в «Центре ДНК» на Советской и в «АльфаМед» на Томина. В поиске доступны фильтры «Все», «ОМС» и «Платно».
-
-Городская выгрузка Geofabrik от 25 ноября 2026 года по времени Кургана даёт 8 131 адресную запись после фильтрации. Координаты филиалов базового каталога сверены с адресами зданий OpenStreetMap. Ссылки на источники телефонов, расписаний и способов оплаты хранятся в PostgreSQL. [OSM у Невежина](https://api.openstreetmap.org/api/0.6/map?bbox=65.299,55.430,65.303,55.433), [OSM у Кравченко](https://api.openstreetmap.org/api/0.6/map?bbox=65.361,55.442,65.365,55.445), [список филиалов для диспансеризации на 2026 год](https://kapmed.ru/upload/iblock/401/d8puzmfuj8ki1k5ua12wi72qqi1oon9i.pdf), [территориальная программа ОМС](https://kurgan-med.ru/info/territorialnaya-programma-gosudarstvennykh-garantiy-besplatnogo-okazaniya-meditsinskoy-pomoshchi-zhi/).
-
-Для обновления справочника выгрузите объекты по городской границе Кургана из файла запроса. Импортер читает готовую локальную выгрузку, использует точки и геометрию адресных зданий, сохраняет OSM ID и за одну транзакцию обновляет справочник. При работе без Compose выполните `python -m alembic upgrade head` и запустите `python -m app.db.import_clinic_addresses <файл>` из `apps/api` с настройками той же PostgreSQL.
+Живой импорт не восстанавливает все вручную проверенные клиники и условия оплаты. Для точной копии рабочего каталога нужна его резервная копия. Сохранить только таблицы карты из существующей локальной БД:
 
 ```powershell
-New-Item -ItemType Directory -Force .local | Out-Null
-curl.exe --fail --get --data-urlencode "data@apps/api/clinic_catalog/kurgan.overpassql" https://overpass-api.de/api/interpreter -o .local/kurgan-addresses.json
-docker compose cp .local/kurgan-addresses.json api:/tmp/kurgan-addresses.json
-docker compose exec api python -m app.container import-clinic-addresses /tmp/kurgan-addresses.json
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --data-only --no-owner --no-privileges --table="public.clinic_*" --file=/tmp/clinic-catalog.sql'
+docker compose cp postgres:/tmp/clinic-catalog.sql .local/clinic-catalog.sql
 ```
 
-Городской набор можно также пересобрать из свежего `ural-fed-district-latest.osm.pbf`. В локальном окружении API установите `osmium` и из `apps/api` запустите `python -m app.db.export_kurgan_addresses <экстракт.osm.pbf> <новый-справочник.json.gz>`. Затем загрузите получившийся файл обычной командой импорта. [Региональные выгрузки Geofabrik](https://download.geofabrik.de/russia/ural-fed-district/).
+Перед переносом проверяйте структуру и содержимое выгрузки, используйте транзакцию и не перезаписывайте конфликтующие данные рабочей БД. Секреты и истории пациентов для переноса справочника не нужны.
 
-Покрытие зависит от разметки OSM. При публикации адресного набора или изменённой базы сохраняйте атрибуцию OpenStreetMap и соблюдайте условия ODbL для производной базы. Атрибуция справочника видна и в режиме списка. [Лицензия и атрибуция OpenStreetMap](https://www.openstreetmap.org/copyright), [граница Кургана в OSM](https://www.openstreetmap.org/relation/398427).
+Для поиска подойдёт адрес «Курган, ул. Кравченко, 53». Для проверки платного приёма можно выбрать «Дерматолог» рядом с Советской, 119. В карточках указаны источники; способы оплаты и доступность записи уточняются в клинике.
 
-Без ключа карта использует тайлы OpenStreetMap. Для основной подложки Яндекса задайте `VITE_YANDEX_TILES_API_KEY` в корневом `.env` перед сборкой Compose или в `apps/web/.env.local` для Vite. В кабинете Яндекса ограничьте ключ доменами фронтенда. У запросов тайлов Referer содержит только origin. Ручной поиск работает через PostgreSQL даже при недоступности обеих подложек. [Настройка Яндекс Tiles API](https://yandex.ru/maps-api/docs/tiles-api/quickstart.html), [правила тайлов OpenStreetMap](https://operations.osmfoundation.org/policies/tiles/).
+Публичный ключ `VITE_YANDEX_TILES_API_KEY` задаётся перед сборкой frontend: в корневом `.env` для Compose, `apps/web/.env.local` для Vite или окружении проекта `medved-web` на Vercel. Ключ доступен браузеру; ограничьте его доменами сайта в кабинете Яндекса. Без него используется OpenStreetMap.
 
-### Источник «Поликлиника45»
+Для обновления адресов сохранены [Overpass-запрос](apps/api/clinic_catalog/kurgan.overpassql) и модуль `app.db.export_kurgan_addresses` для выгрузок Geofabrik. Данные OpenStreetMap требуют [атрибуции и соблюдения ODbL](https://www.openstreetmap.org/copyright). Импорт «Поликлиники45» поддерживает `--collect-only`, `--snapshot-out` и проверку набора до записи; параметры доступны через `python -m app.db.import_poliklinika45 --help` из `apps/api`.
 
-Фильтр «ОМС» учитывает подтверждённые услуги и государственные учреждения из тарифного соглашения. Если выбран специалист, для второго случая его приём должен быть опубликован для конкретного филиала. В карточке таких результатов указано, что условия приёма нужно уточнить в регистратуре. [Тарифное соглашение Курганской области](https://base.garant.ru/414160161/c9c989f1e999992b41b30686f0032f7d/).
+## MAX и размещение
 
-Импорт дополняет филиалы и специальности в PostgreSQL. Поиск и карточки читают локальную базу. Кнопка «Записаться через Поликлинику45» открывает сопоставленную страницу учреждения. Кнопка «Записаться через Госуслуги» ведёт на форму записи, где при необходимости выбирают филиал. Для платного приёма и частных клиник запись предлагается по телефону.
+| Компонент | Размещение |
+| --- | --- |
+| [Сайт](https://medved-web-five.vercel.app) | Vercel, проект `medved-web`, Root Directory `apps/web` |
+| [API / health](https://medved-api.vercel.app/health) | Vercel, проект `medved-api`, Root Directory `apps/api` |
+| PostgreSQL | Neon |
+| Relay авторизации | Cloud.ru Container Apps, модуль `apps/api/app/core_relay.py` |
 
-Для проверки ОМС выберите «Гинеколог» и «ОМС». Для взрослого пациента есть, например, филиалы на Дзержинского, 41Б и Карельцева, 54. Для ребёнка есть отделения на Коли Мяготина, 114 и проспекте Конституции, 38. Условия приёма и прикрепление уточняются в регистратуре.
+Production-ветка обоих проектов Vercel — **`main`**. Рабочие изменения можно собирать в `develop`, затем переносить проверенную версию в `main`. Слияние в `main` запускает независимые публикации сайта и API; перед проверкой дождитесь `Ready` у обоих. Другие ветки дают preview. `vercel.json` каждого приложения содержит настройки его сборки.
 
-Выгрузка от 25 ноября 2026 года включает 17 учреждений и 102 подразделения. Импорт обходит 37 профилей портала и сопоставляет подразделения с адресами в Кургане. Несколько кабинетов одного учреждения по одному адресу могут относиться к одной карточке. Если у государственного филиала нет опубликованного номера, в новой карточке доступен региональный контакт-центр 122. Способы оплаты подтверждаются отдельно для филиала и услуги. В условиях технических работ, недоступности или неизвестной разметки команда останавливается до записи в БД. [Специальности](https://www.poliklinika45.ru/service/schedule/profiles), [региональный контакт-центр](https://kurgan-med.ru/kontakty/), [robots.txt](https://www.poliklinika45.ru/robots.txt).
+Авторизация проходит так:
 
-Команда сначала сохраняет и полностью проверяет набор, затем применяет его. Для проверки без обновления БД используйте `--collect-only` вместе с `--snapshot-out`. Сохранённый проверенный набор можно загрузить повторно. Это внутренний JSON МедВеда. Корень содержит `schema_version: 1`, `source: "poliklinika45"`, `complete: true`, `retrieved_at` с часовым поясом, `start_url` и `pages`. Каждая страница содержит публичный `url`, `records` и `next_url` для следующей страницы. В записи обязательны `kind` (`organization` или `branch`), `external_id` и публичный `url`. Можно указать `name`, `organization_external_id`, `organization_name`, `address`, `phones` в E.164 или короткий номер 122, `official_website`, `facility_kind` (`public` или `private`), `specialties` и `field_urls` для отдельного происхождения полей. В `specialty_urls` можно указать публичную страницу для каждой специальности. Опубликованное расписание можно сохранить в `schedule` с полями `specialty`, `date`, `starts_at`, `ends_at` и датой актуальности `schedule_as_of` на записи. Живой обход собирает датированные диапазоны опубликованных временных отметок максимум из десяти открытых расписаний. Доступность талонов и имена врачей в набор не включаются.
+1. Организаторы открывают сайт из своего mini-app с краткоживущим JWT в query-параметре `token`.
+2. Frontend удаляет параметр из адресной строки и отправляет его в `POST /api/v1/auth/launch` как `host_token`, `mode=host`.
+3. API обращается к relay по HTTPS с отдельным `CORE_RELAY_TOKEN`. Relay передаёт JWT в Core: `GET /api/v3/users/user-for-external-service?token=...`, с серверным `CORE_SERVICE_TOKEN` в Bearer-заголовке.
+4. После подтверждения пользователя API выдаёт собственную короткоживущую сессию. Frontend хранит её только в памяти.
+
+JWT пользователя, сервисный токен организаторов и секрет relay — разные значения. Учебные учётные записи организаторов привязываются к аккаунту MAX; не используйте их автоматически. Для повторного входа нужен свежий запуск через кнопку MAX.
+
+Relay имеет постоянный адрес Cloud.ru и не зависит от ноутбука. Настройте `CORE_RELAY_URL` в API и одинаковый `CORE_RELAY_TOKEN` у API и relay; `CORE_SERVICE_TOKEN` нужен самому relay. В текущем размещении минимум экземпляров — 0, максимум — 1, ресурсы — 0,5 CPU / 1 ГБ. После простоя контейнер стартует заново, поэтому время пробуждения нужно учитывать при проверке авторизации. История успешных входов не гарантирует успешный холодный старт.
+
+Для контейнера relay используется команда `python -m uvicorn app.core_relay:create_relay --factory --host 0.0.0.0 --port 8080 --no-access-log --no-proxy-headers`. Порт контейнера — 8080, внешний HTTPS обеспечивает облачная платформа. Секреты задаются окружением, не включаются в образ. Free tier имеет квоты; хранение образа и превышения оплачиваются отдельно.
+
+## Переменные окружения
+
+Общий пример Compose — [`.env.example`](.env.example). Полный серверный шаблон — [`apps/api/.env.example`](apps/api/.env.example); публичные настройки frontend — [`apps/web/.env.example`](apps/web/.env.example).
+
+| Где | Переменные |
+| --- | --- |
+| API: авторизация | `DEMO_MODE=false`, `SESSION_SIGNING_KEY`, `CORE_RELAY_URL`, `CORE_RELAY_TOKEN`, `CORE_TIMEOUT_SECONDS` |
+| API: прямой Core, если доступен | `CORE_URL`, `CORE_SERVICE_TOKEN` |
+| API: БД | `DATABASE_URL`, при необходимости `DATABASE_SSL_CA_FILE` |
+| API: шифрование | Постоянный `DATA_ENCRYPTION_KEY_FILE`; на Vercel допустим `DATA_ENCRYPTION_KEY` — base64 от 32 случайных байтов |
+| API: Groq | `NLP_MODE=live`, `GROQ_API_KEY`, `GROQ_MODEL`, `GROQ_TIMEOUT_SECONDS` |
+| API: распознавание | `VOICE_PROVIDER=groq`, `GROQ_TRANSCRIPTION_MODEL` |
+| API: CORS | `CORS_ORIGINS` с точным HTTPS origin сайта |
+| Frontend | `VITE_HOST_MODE=max`, `VITE_SURVEY_MODE=api`, `VITE_API_ORIGIN`, `VITE_YANDEX_TILES_API_KEY` |
+| Relay | `CORE_SERVICE_TOKEN`, `CORE_RELAY_TOKEN` |
+
+Переменные `VITE_*` попадают в браузер — приватные ключи под такими именами не задаются. В Vercel избегайте пересекающихся записей одной переменной для Production: старый адрес может перекрыть новый. Изменения окружения применяются после новой публикации. Ключ подписи и ключ шифрования нельзя генерировать заново при каждом deployment.
+
+Миграции Alembic запускаются сборкой API до старта приложения. На Vercel PostgreSQL URL преобразуется для asyncpg, TLS проверяет сертификат и имя сервера. Для локального API напрямую используется `postgresql+asyncpg://...` без параметров `ssl`/`sslmode`, с CA в `DATABASE_SSL_CA_FILE`.
+
+CSP frontend разрешает встраивание в `https://web.max.ru` и `https://tm-test-yakut.hostco.ru`. Защита deployment не должна требовать входа в Vercel от пользователей MAX. Токены, query-параметры запуска и содержимое анкет не следует включать в инфраструктурную аналитику.
+
+## Разработка без общего Docker-стека
+
+Нужны Python 3.12+, Node.js 22.12+ и Docker для локальной PostgreSQL. Из корня, в PowerShell:
 
 ```powershell
-docker compose exec api python -m app.container import-poliklinika45 --live --report /tmp/poliklinika45-report.json
-docker compose cp api:/tmp/poliklinika45-report.json .local/poliklinika45-report.json
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e "apps/api[test]" -r apps/api/requirements-backend.txt
+cd apps/api
+python -m app.core.local_setup --directory ../../.local/runtime
+docker compose --project-name medved_local --env-file ../../.local/runtime/backend.env -f compose.postgres.yaml up -d --wait
+python -m alembic -x env_file=../../.local/runtime/backend.env upgrade head
+.\run_demo.ps1
 ```
 
-При запуске без Compose выполните `python -m app.db.import_poliklinika45 --live --report <отчёт.json>` из `apps/api` с настройками TLS той же базы. Для периодического обновления запускайте эту команду из Планировщика заданий или cron, например ежедневно в 03:00 по времени Кургана. Запросы выполняются последовательно с интервалом не меньше секунды. Повторы ограничены, учитывается `Retry-After`. Импорт проверяет связность страниц, применяет набор в одной транзакции под блокировкой PostgreSQL и сохраняет в отчёт совпадения, конфликты, поля и адреса для проверки. При сбое HTTP, CAPTCHA, заглушке или неполном наборе справочник остаётся на прошлой успешной версии.
+Генератор ключей вызывается один раз для новой папки. Для повторного запуска используйте уже созданный `backend.env`. API доступен по HTTPS на `localhost:8443`, PostgreSQL — на `127.0.0.1:55432`. OpenAPI доступен в `/docs`.
 
-## Голосовой ввод
-
-На Vercel распознавание выполняет Groq Whisper: в серверных Environment Variables
-проекта `medved-api` задаются `VOICE_PROVIDER=groq`, `GROQ_API_KEY` и
-`GROQ_TRANSCRIPTION_MODEL=whisper-large-v3-turbo`. Запись передаётся Groq для
-распознавания; текст возвращается в черновик. `INSTALL_VOICE` относится только
-к Docker и не устанавливает локальную модель на Vercel.
-
-Диктовка на русском доступна в текстовых полях анкеты и в чате. Запись длится до 30 секунд. После остановки распознанный текст добавляется в черновик. Приложение обрабатывает аудио на своём сервере и не сохраняет запись в базе.
-
-Подготовьте модель один раз из корня репозитория:
-
-```powershell
-python -m pip install -r apps/api/requirements-voice.txt
-python -c "from faster_whisper.utils import download_model; download_model('base', output_dir='.local/models/whisper-base')"
-```
-
-Для Docker задайте `INSTALL_VOICE=1` в корневом `.env` и запустите `docker compose up --build -d`. При запуске API без Docker укажите в `apps/api/.env` абсолютный путь к скачанной папке в `WHISPER_MODEL_PATH`. Откройте приложение по HTTPS и разрешите доступ к микрофону.
-
-## Компоненты и запуск
-
-- [PostgreSQL](apps/api/README_POSTGRES.md) — схема, миграции и запуск БД.
-- [Backend и API](apps/api/README_BACKEND.md) — конфигурация, запуск сервера,
-  сессии PostgreSQL и правила безопасности.
-- [Groq NLP](apps/api/README.md) — установка, mock, fallback и формат извлечения.
-- [React UI](apps/web/README.md) — запуск, demo/production-сборки и браузерные тесты.
-- [MAX](apps/api/MAX_INTEGRATION.md) — границы серверной проверки host-токена.
-
-Для общей проверки Python-компонентов из `apps/api`:
-
-```powershell
-python -m pip install -e ".[test]" -r requirements-backend.txt
-python -m pytest -q
-```
-
-Для проверки frontend из `apps/web`:
+В другом терминале из `apps/web`:
 
 ```powershell
 npm ci
+```
+
+Создайте `apps/web/.env.local` с `VITE_HOST_MODE=demo`, `VITE_SURVEY_MODE=api` и `VITE_API_ORIGIN=https://localhost:8443`, затем выполните `npm run dev`. Локальному браузеру требуется доверие к CA из `.local/runtime/ca.crt`. Для MAX-режима API есть `run_max.ps1`; нужны серверные настройки Core либо relay и `DEMO_MODE=false`.
+
+## Проверки
+
+Python, из `apps/api` с активным окружением:
+
+```powershell
+python -m pytest -q
+```
+
+Интеграционные тесты PostgreSQL требуют отдельной **тестовой** базы в `TEST_DATABASE_URL` и её CA в `DATABASE_SSL_CA_FILE`. Для неё сохранён `apps/api/compose.postgres-test.yaml`; без тестового URL такие проверки пропускаются. Не направляйте тесты миграций на рабочую БД.
+
+Frontend, из `apps/web`:
+
+```powershell
 npm run lint
 npm run test:unit
 npm run build
-npm run build:demo
 npx playwright install chromium
 npm test
 ```
 
-Для проверки истории в браузере с локальным HTTPS API и PostgreSQL
-используйте `npm run test:live` по инструкции в [README frontend](apps/web/README.md#сквозная-проверка-с-настоящей-бд).
+`npm run test:live` отдельно проверяет UI с локальным HTTPS API и синтетической PostgreSQL. Он ожидает API на `https://127.0.0.1:8444` с demo-авторизацией и CORS для `http://127.0.0.1:4174`; адрес можно переопределить через `MEDVED_LIVE_API_ORIGIN`. Удалённые production-адреса этим режимом не поддерживаются.
 
-Не передавайте реальные медицинские данные и не добавляйте секреты в Git.
-Клиническая проверка правил и проверка реального MAX остаются отдельными задачами.
+## API и обслуживание
+
+| Маршрут | Назначение |
+| --- | --- |
+| `GET /health` | Готовность API |
+| `POST /api/v1/auth/launch` | Обмен host JWT на сессию приложения |
+| `/api/v1/sessions` | Создание, ответы, возврат, итог и удаление опроса |
+| `POST /api/v1/sessions/{id}/emergency-explanation` | Объяснение причины экстренной остановки |
+| `/api/v1/chats` | История, сообщения и удаление чатов |
+| `POST /api/v1/voice/transcriptions` | Распознавание аудио |
+| `/api/v1/clinics/geocode`, `/reverse-geocode`, `/search` | Поиск адреса и клиник |
+
+Контракты и схемы доступны через `/docs` и `/openapi.json` API. Методы с данными требуют Bearer-сессии владельца.
+
+Очистка истёкших обращений выполняется модулем `app.db.cleanup`. Для локального окружения из `apps/api`:
+
+```powershell
+python -m app.db.cleanup --env-file ../../.local/runtime/backend.env
+python -m app.db.backup --env-file ../../.local/runtime/backend.env backup ../../.local/backups/medved.dump
+```
+
+Локальный backup использует контейнер проекта `medved_local`; восстановление выполняется в новую БД через подкоманду `restore --database <новая_БД>`. Облачные резервные копии создаются средствами провайдера или PostgreSQL. Для восстановления историй нужны исходные ключи шифрования. Справочник клиник переносится отдельно от пользовательских обращений.
+
+JSON анкет и переписок шифруется, обращения изолированы по пользователю, используются TTL и проверяемый TLS. Ограничитель запросов хранится в памяти процесса и не является распределённой защитой. Подробности: [логи](docs/LOGGING.md), [prompt-инъекции](docs/PROMPT_SECURITY.md).

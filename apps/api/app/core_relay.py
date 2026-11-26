@@ -1,4 +1,4 @@
-"""Local MAX verification relay. Run behind an HTTPS tunnel, bound to loopback."""
+"""MAX verification relay. Deploy behind managed HTTPS with server-side credentials."""
 
 import hmac
 import os
